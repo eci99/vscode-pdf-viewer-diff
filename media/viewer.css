@@ -1,0 +1,150 @@
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#toolbar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 32px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  background: var(--vscode-editorWidget-background);
+  border-bottom: 1px solid var(--vscode-editorWidget-border, transparent);
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  z-index: 10;
+  white-space: nowrap;
+}
+
+#toolbar .spacer {
+  flex: 1;
+}
+
+#toolbar button {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#toolbar button:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+#toolbar button[aria-pressed='true'] {
+  background: var(--vscode-inputOption-activeBackground);
+  color: var(--vscode-inputOption-activeForeground, inherit);
+  outline: 1px solid var(--vscode-inputOption-activeBorder, transparent);
+  outline-offset: -1px;
+}
+
+#toolbar button svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#toolbar .separator {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--vscode-editorWidget-border, currentColor);
+  opacity: 0.6;
+}
+
+#toolbar input,
+#toolbar select {
+  height: 22px;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 2px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+}
+
+#toolbar input:focus,
+#toolbar select:focus,
+#toolbar button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+#pageNumber {
+  width: 52px;
+  text-align: right;
+}
+
+#findInput {
+  width: 180px;
+  padding: 0 4px;
+}
+
+#findInput.notFound {
+  outline: 1px solid var(--vscode-inputValidation-errorBorder);
+  outline-offset: -1px;
+}
+
+#findCount {
+  min-width: 56px;
+  opacity: 0.8;
+}
+
+/* pdf.js requires an absolutely positioned scroll container */
+#viewerContainer {
+  position: absolute;
+  inset: 32px 0 0 0;
+  overflow: auto;
+  background: var(--vscode-editor-background);
+  outline: none;
+}
+
+/* Hand tool: drag to scroll instead of selecting text */
+#viewerContainer.handTool,
+#viewerContainer.handTool .textLayer,
+#viewerContainer.handTool .textLayer * {
+  cursor: grab;
+  user-select: none;
+}
+
+#viewerContainer.handTool.grabbing,
+#viewerContainer.handTool.grabbing * {
+  cursor: grabbing;
+}
+
+#message {
+  position: absolute;
+  inset: 32px 0 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-errorForeground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  text-align: center;
+}
+
+#message[hidden] {
+  display: none;
+}
