@@ -4,7 +4,6 @@
   "description": "View PDF files in VS Code and compare them visually",
   "version": "0.1.0",
   "publisher": "eci99",
-  "private": true,
   "license": "MIT",
   "icon": "images/icon.png",
   "repository": {
@@ -48,7 +47,10 @@
             "filenamePattern": "*.pdf"
           }
         ],
-        "priority": "default"
+        "priority": {
+          "textEditor": "default",
+          "diffEditor": "default"
+        }
       },
       {
         "viewType": "pdfViewer.compare",
