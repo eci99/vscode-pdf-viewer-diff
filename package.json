@@ -7,6 +7,14 @@
   "private": true,
   "license": "MIT",
   "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eci99/vscode-pdf-viewer-diff.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eci99/vscode-pdf-viewer-diff/issues"
+  },
+  "homepage": "https://github.com/eci99/vscode-pdf-viewer-diff#readme",
   "engines": {
     "vscode": "^1.90.0"
   },

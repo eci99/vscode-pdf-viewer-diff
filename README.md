@@ -85,7 +85,7 @@ The extension code is in `src/extension.ts`. The webviews are plain JavaScript m
 ## Installing
 
 ```sh
-npx vsce package --allow-missing-repository --no-rewrite-relative-links
+npx vsce package
 code --install-extension pdf-viewer-diff-0.1.0.vsix
 ```
 
