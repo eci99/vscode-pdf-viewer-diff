@@ -1,16 +1,27 @@
 {
-  "name": "vscode-pdfviewer",
-  "displayName": "PDF Viewer",
-  "description": "PDF-Dateien direkt in VS Code anzeigen",
+  "name": "pdf-viewer-diff",
+  "displayName": "PDF Viewer & Diff",
+  "description": "View PDF files in VS Code and compare them visually",
   "version": "0.1.0",
-  "publisher": "local",
+  "publisher": "eci99",
   "private": true,
   "license": "MIT",
+  "icon": "images/icon.png",
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": [
     "Other"
+  ],
+  "keywords": [
+    "pdf",
+    "pdf viewer",
+    "pdf diff",
+    "compare",
+    "diff",
+    "preview",
+    "latex",
+    "pdf.js"
   ],
   "main": "./out/extension.js",
   "capabilities": {
@@ -33,7 +44,7 @@
       },
       {
         "viewType": "pdfViewer.compare",
-        "displayName": "PDF-Vergleich",
+        "displayName": "PDF Comparison",
         "selector": [
           {
             "filenamePattern": "*.pdfdiff"
@@ -45,18 +56,18 @@
     "commands": [
       {
         "command": "pdfViewer.compare",
-        "title": "PDF vergleichen mit…",
+        "title": "Compare PDF with…",
         "category": "PDF Viewer",
         "icon": "$(diff)"
       },
       {
         "command": "pdfViewer.nextDifference",
-        "title": "Zum nächsten Unterschied",
+        "title": "Go to Next Difference",
         "category": "PDF Viewer"
       },
       {
         "command": "pdfViewer.previousDifference",
-        "title": "Zum vorherigen Unterschied",
+        "title": "Go to Previous Difference",
         "category": "PDF Viewer"
       }
     ],

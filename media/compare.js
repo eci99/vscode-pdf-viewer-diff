@@ -229,7 +229,7 @@ async function main() {
       pageView.div.append(layer);
     } catch (err) {
       if (err?.name !== 'RenderingCancelledException' && otherRenders.get(n) === token) {
-        console.error(`Seite ${n} konnte nicht überlagert werden`, err);
+        console.error(`Page ${n} could not be overlaid`, err);
       }
     }
   };
@@ -472,13 +472,13 @@ async function main() {
     } else if (done < diffResults.length) {
       text = `Vergleiche … ${done} / ${diffResults.length}`;
     } else if (!diffs.length) {
-      text = 'Keine Unterschiede';
+      text = 'No differences';
     } else if (focused >= 0) {
-      text = `Unterschied ${focused + 1} von ${diffs.length}`;
+      text = `Difference ${focused + 1} of ${diffs.length}`;
     } else {
       text =
-        `${diffs.length} ${diffs.length === 1 ? 'Unterschied' : 'Unterschiede'} ` +
-        `auf ${pages} ${pages === 1 ? 'Seite' : 'Seiten'}`;
+        `${diffs.length} ${diffs.length === 1 ? 'difference' : 'differences'} ` +
+        `on ${pages} ${pages === 1 ? 'page' : 'pages'}`;
     }
     $('diffStatus').textContent = text;
     reportDifferences(diffs);
@@ -533,7 +533,7 @@ async function main() {
         result = await diffPage(index + 1);
       } catch (err) {
         if (run === diffRun) {
-          console.error(`Seite ${index + 1} konnte nicht verglichen werden`, err);
+          console.error(`Page ${index + 1} could not be compared`, err);
         }
         result = { regions: [] };
       }
@@ -555,7 +555,10 @@ async function main() {
 
   // pdf.js removes foreign nodes from a page whenever it re-renders it.
   eventBus.on('pagerendered', (e) => {
-    void renderOtherLayer(e.source);
+    // The sharper detail of the visible part, rendered at high zoom, leaves them alone.
+    if (!e.isDetailView) {
+      void renderOtherLayer(e.source);
+    }
     attachMarks(e.pageNumber - 1);
   });
 
@@ -667,8 +670,8 @@ async function main() {
       const name = $(side === 'left' ? 'showLeft' : 'showRight').textContent.trim();
       showMessage(
         err?.name === 'PasswordException'
-          ? `${name} ist passwortgeschützt und kann nicht angezeigt werden.`
-          : `${name} konnte nicht geladen werden: ${err?.message ?? err}`,
+          ? `${name} is password-protected and cannot be displayed.`
+          : `${name} could not be loaded: ${err?.message ?? err}`,
       );
     }
   }
@@ -696,7 +699,7 @@ async function main() {
       goToDiff(msg.direction);
 
     } else if (msg.type === 'error') {
-      showMessage(`Datei konnte nicht gelesen werden: ${msg.message}`);
+      showMessage(`The file could not be read: ${msg.message}`);
     }
   });
 
@@ -704,4 +707,4 @@ async function main() {
   vscode.postMessage({ type: 'ready' });
 }
 
-main().catch((err) => showMessage(`Viewer konnte nicht gestartet werden: ${err?.message ?? err}`));
+main().catch((err) => showMessage(`The viewer could not be started: ${err?.message ?? err}`));

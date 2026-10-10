@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34404f"/>
+      <stop offset="1" stop-color="#1b222b"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="52" fill="url(#bg)"/>
+  <!-- page with folded corner -->
+  <path d="M70 30h84l44 44v140a12 12 0 0 1-12 12H70a12 12 0 0 1-12-12V42a12 12 0 0 1 12-12z" fill="#ffffff"/>
+  <path d="M154 30l44 44h-32a12 12 0 0 1-12-12z" fill="#c9d1db"/>
+  <!-- text lines -->
+  <g stroke="#8492a3" stroke-width="10" stroke-linecap="round">
+    <path d="M82 92h60"/>
+    <path d="M82 116h92"/>
+  </g>
+  <!-- a difference: highlighted, old in red, new in green -->
+  <rect x="74" y="132" width="108" height="46" rx="6" fill="#ffe070"/>
+  <g stroke-width="10" stroke-linecap="round">
+    <path d="M86 146h52" stroke="#e00000"/>
+    <path d="M86 164h84" stroke="#009a00"/>
+  </g>
+  <!-- PDF badge -->
+  <rect x="28" y="182" width="124" height="52" rx="12" fill="#e02424"/>
+  <text x="90" y="221" text-anchor="middle" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif" font-weight="bold" font-size="38" fill="#ffffff">PDF</text>
+</svg>

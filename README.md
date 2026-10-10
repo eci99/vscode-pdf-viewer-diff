@@ -1,8 +1,8 @@
-# PDF Viewer for VS Code
+# PDF Viewer & Diff
 
 Displays PDF files directly in the editor and compares two PDFs visually. Rendering is done by [pdf.js](https://mozilla.github.io/pdf.js/).
 
-The user interface (button tooltips, command titles, messages) is currently in German; the German labels are given in parentheses below.
+![A PDF opened in the viewer](images/viewer.png)
 
 ## Features
 
@@ -21,13 +21,16 @@ Password-protected PDFs are not supported; an error message is shown instead.
 
 ## Comparing PDFs
 
-There are three ways to start a comparison:
+There are four ways to start a comparison:
 
-- In the Explorer, select two PDF files, right-click and choose **PDF vergleichen mit…** ("Compare PDF with…").
-- With a PDF open, use the compare button at the top right of the tab bar, or run the command **PDF Viewer: PDF vergleichen mit…**, and pick the second file.
+- In the Explorer, select two PDF files, right-click and choose **Compare PDF with…**.
+- With a PDF open, use the compare button at the top right of the tab bar, or run the command **PDF Viewer: Compare PDF with…**, and pick the second file.
+- Open a diff of two PDFs anywhere in VS Code, e.g. by clicking a changed PDF in the **Source Control** view or with **Compare Selected** in the Explorer. The comparison replaces the diff editor, which would only show the two files side by side.
 - After an open PDF has been reloaded because it changed on disk, the clock button in the viewer toolbar compares it with the version shown before the reload. That earlier version is kept in memory only.
 
 ### What you see
+
+![Comparison of two versions of a PDF](images/compare.png)
 
 The two files are compared page by page (page 1 with page 1, and so on) by rendering both and comparing the pixels. An inserted page therefore makes all following pages show up as different.
 
@@ -59,7 +62,7 @@ While a comparison is the active editor, these keys jump between differences:
 | `F8` or `Alt`+`F8` | Next difference |
 | `Shift`+`F8` or `Shift`+`Alt`+`F8` | Previous difference |
 
-The same actions are available as the commands **PDF Viewer: Zum nächsten Unterschied** and **PDF Viewer: Zum vorherigen Unterschied**.
+The same actions are available as the commands **PDF Viewer: Go to Next Difference** and **PDF Viewer: Go to Previous Difference**.
 
 Clicking an entry in the Problems view only brings the comparison to the front; it does not jump to that difference.
 
@@ -82,6 +85,10 @@ The extension code is in `src/extension.ts`. The webviews are plain JavaScript m
 ## Installing
 
 ```sh
-npx vsce package --allow-missing-repository --skip-license
-code --install-extension vscode-pdfviewer-0.1.0.vsix
+npx vsce package --allow-missing-repository --no-rewrite-relative-links
+code --install-extension pdf-viewer-diff-0.1.0.vsix
 ```
+
+## License
+
+[MIT](LICENSE). The bundled pdf.js is licensed under the Apache License 2.0; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

@@ -74,8 +74,8 @@ async function main() {
       }
       showMessage(
         err?.name === 'PasswordException'
-          ? 'Dieses PDF ist passwortgeschützt und kann nicht angezeigt werden.'
-          : `PDF konnte nicht geladen werden: ${err?.message ?? err}`,
+          ? 'This PDF is password-protected and cannot be displayed.'
+          : `The PDF could not be loaded: ${err?.message ?? err}`,
       );
     }
   }
@@ -233,10 +233,10 @@ async function main() {
       // The extension keeps the version shown before the last reload.
       $('comparePrevious').disabled = !msg.available;
       $('comparePrevious').title = msg.available
-        ? 'Mit der Version vor dem letzten Neuladen vergleichen'
-        : 'Mit der Version vor dem letzten Neuladen vergleichen (noch keine frühere Version)';
+        ? 'Compare with the version before the last reload'
+        : 'Compare with the version before the last reload (no earlier version yet)';
     } else if (msg.type === 'error') {
-      showMessage(`Datei konnte nicht gelesen werden: ${msg.message}`);
+      showMessage(`The file could not be read: ${msg.message}`);
     }
   });
   $('comparePrevious').addEventListener('click', () => vscode.postMessage({ type: 'comparePrevious' }));
@@ -244,4 +244,4 @@ async function main() {
   vscode.postMessage({ type: 'ready' });
 }
 
-main().catch((err) => showMessage(`Viewer konnte nicht gestartet werden: ${err?.message ?? err}`));
+main().catch((err) => showMessage(`The viewer could not be started: ${err?.message ?? err}`));

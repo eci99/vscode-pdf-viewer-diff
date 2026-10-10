@@ -59,6 +59,9 @@ async function sendPdf(
   }
 }
 
+// How long (ms) after opening a PDF it is checked whether it is part of a diff editor.
+const DIFF_EDITOR_DELAY = 100;
+
 // How long (ms) a compared file has to stay deleted before its comparison is closed.
 const FILE_GONE_DELAY = 2000;
 
@@ -116,10 +119,42 @@ class PdfDocument implements vscode.CustomDocument {
 class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocument> {
   static readonly viewType = 'pdfViewer.preview';
 
+  /** The open editors, in the order they were opened. */
+  private readonly panels = new Map<vscode.WebviewPanel, PdfDocument>();
+
   constructor(private readonly extensionUri: vscode.Uri) {}
 
   openCustomDocument(uri: vscode.Uri): PdfDocument {
     return new PdfDocument(uri);
+  }
+
+  // The diff editor of VS Code (e.g. for a change in Source Control) shows two of these
+  // editors side by side in one tab. There is no API that tells so; the pair is recognised
+  // by both panels being visible in the same editor group. It is replaced by a comparison.
+  private replaceDiffEditor(panel: vscode.WebviewPanel): void {
+    if (!this.panels.has(panel)) {
+      return;
+    }
+    const pair = [...this.panels].filter(
+      ([other]) => other.visible && other.viewColumn === panel.viewColumn,
+    );
+    const tab = vscode.window.tabGroups.all.find((g) => g.viewColumn === panel.viewColumn)?.activeTab;
+    if (pair.length !== 2 || !tab || tab.input instanceof vscode.TabInputCustom) {
+      return;
+    }
+    // The original is opened first; a version from git is the original in any case.
+    let [original, modified] = pair.map(([, document]) => document.uri);
+    if (original.scheme !== GIT_SCHEME && modified.scheme === GIT_SCHEME) {
+      [original, modified] = [modified, original];
+    }
+    openCompare(fileSource(original), fileSource(modified), {
+      viewColumn: panel.viewColumn,
+      preview: tab.isPreview,
+    }).then(
+      // If the diff was a preview tab, the comparison has replaced it already.
+      () => vscode.window.tabGroups.close(tab).then(undefined, () => {}),
+      () => {},
+    );
   }
 
   resolveCustomEditor(document: PdfDocument, panel: vscode.WebviewPanel): void {
@@ -136,10 +171,10 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
           void webview.postMessage({ type: 'previous', available: !!document.previous });
         } else if (msg.type === 'comparePrevious' && document.previous) {
           const name = baseName(document.uri);
-          openCompare(
+          void openCompare(
             {
-              name: `${name} (vorher)`,
-              description: 'Version vor dem letzten Neuladen',
+              name: `${name} (before)`,
+              description: 'Version before the last reload',
               data: document.previous,
             },
             { name, description: vscode.workspace.asRelativePath(document.uri), uri: document.uri },
@@ -148,9 +183,16 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
       }),
       watchFile(document.uri, () => void send()),
     ];
-    panel.onDidDispose(() => disposables.forEach((d) => d.dispose()));
+    this.panels.set(panel, document);
+    panel.onDidDispose(() => {
+      this.panels.delete(panel);
+      disposables.forEach((d) => d.dispose());
+    });
 
     webview.html = buildHtml(webview, this.extensionUri, 'viewer.js', VIEWER_BODY);
+    // Wait until the tab and the visibility of the panels are known.
+    const timer = setTimeout(() => this.replaceDiffEditor(panel), DIFF_EDITOR_DELAY);
+    disposables.push(new vscode.Disposable(() => clearTimeout(timer)));
   }
 }
 
@@ -166,7 +208,7 @@ async function comparePdfs(uri?: vscode.Uri, selected?: vscode.Uri[]): Promise<v
   const pickPdf = async (title: string, near?: vscode.Uri): Promise<vscode.Uri | undefined> => {
     const picked = await vscode.window.showOpenDialog({
       title,
-      openLabel: 'Auswählen',
+      openLabel: 'Select',
       canSelectMany: false,
       filters: { PDF: ['pdf'] },
       defaultUri: near && vscode.Uri.joinPath(near, '..'),
@@ -181,23 +223,48 @@ async function comparePdfs(uri?: vscode.Uri, selected?: vscode.Uri[]): Promise<v
     // Two files selected in the explorer: compare them directly.
     [left, right] = pdfs;
   } else {
-    left = uri ?? activePdfUri() ?? (await pickPdf('Erste PDF-Datei auswählen'));
+    left = uri ?? activePdfUri() ?? (await pickPdf('Select the first PDF file'));
     if (!left) {
       return;
     }
-    right = await pickPdf(`„${baseName(left)}“ vergleichen mit …`, left);
+    right = await pickPdf(`Compare “${baseName(left)}” with…`, left);
   }
   if (!left || !right) {
     return;
   }
-  openCompare(fileSource(left), fileSource(right));
+  await openCompare(fileSource(left), fileSource(right));
 }
 
-const fileSource = (uri: vscode.Uri): CompareSource => ({
-  name: baseName(uri),
-  description: vscode.workspace.asRelativePath(uri),
-  uri,
-});
+const GIT_SCHEME = 'git';
+
+// Short name of the version a URI of the git extension refers to.
+function gitVersion(uri: vscode.Uri): string | undefined {
+  if (uri.scheme !== GIT_SCHEME) {
+    return undefined;
+  }
+  try {
+    const { ref } = JSON.parse(uri.query) as { ref?: string };
+    if (ref === '') {
+      return 'Index';
+    }
+    // '~' is the index or, if the file is not staged, HEAD.
+    if (!ref || ref === '~') {
+      return 'Git';
+    }
+    return /^[0-9a-f]{40}$/.test(ref) ? ref.slice(0, 8) : ref;
+  } catch {
+    return 'Git';
+  }
+}
+
+function fileSource(uri: vscode.Uri): CompareSource {
+  const version = gitVersion(uri);
+  return {
+    name: baseName(uri) + (version ? ` (${version})` : ''),
+    description: vscode.workspace.asRelativePath(uri),
+    uri,
+  };
+}
 
 // A comparison is opened as a custom editor on a virtual document. Having a
 // URI of its own lets the differences be reported as diagnostics ("Problems").
@@ -211,16 +278,25 @@ interface Comparison {
 /** Comparisons opened in this session, by id; needed for sources that only exist in memory. */
 const comparisons = new Map<string, Comparison>();
 
-function openCompare(left: CompareSource, right: CompareSource): void {
+function openCompare(
+  left: CompareSource,
+  right: CompareSource,
+  options: vscode.TextDocumentShowOptions = {},
+): Thenable<unknown> {
   const id = crypto.randomUUID();
   comparisons.set(id, { left, right });
   const uri = vscode.Uri.from({
     scheme: COMPARE_SCHEME,
-    path: `/${left.name} ↔ ${right.name}.pdfdiff`,
+    path: `/${left.name} ↔ ${right.name}.pdfdiff`.replace(/(?!^)\//g, '∕'),
     // The file URIs allow restoring the comparison after a restart.
     query: JSON.stringify({ id, left: left.uri?.toString(), right: right.uri?.toString() }),
   });
-  void vscode.commands.executeCommand('vscode.openWith', uri, CompareEditorProvider.viewType);
+  return vscode.commands.executeCommand(
+    'vscode.openWith',
+    uri,
+    CompareEditorProvider.viewType,
+    options,
+  );
 }
 
 class CompareDocument implements vscode.CustomDocument {
@@ -343,14 +419,14 @@ class CompareEditorProvider implements vscode.CustomReadonlyEditorProvider<Compa
       indexOnPage = i > 0 && items[i - 1].page === item.page ? indexOnPage + 1 : 0;
       const position = new vscode.Position(item.page - 1, indexOnPage);
       const message = item.only
-        ? `Seite ${item.page} existiert nur in „${comparison[item.only].name}“`
-        : `Unterschied auf Seite ${item.page}`;
+        ? `Page ${item.page} exists only in “${comparison[item.only].name}”`
+        : `Difference on page ${item.page}`;
       const diagnostic = new vscode.Diagnostic(
         new vscode.Range(position, position),
         message,
         vscode.DiagnosticSeverity.Information,
       );
-      diagnostic.source = 'PDF-Vergleich';
+      diagnostic.source = 'PDF comparison';
       return diagnostic;
     });
   }
@@ -396,7 +472,7 @@ class CompareFileSystem implements vscode.FileSystemProvider {
 // Toolbar button that shows/hides one of the two documents; doubles as colour legend.
 function documentToggle(side: 'left' | 'right', source: CompareSource): string {
   const id = side === 'left' ? 'showLeft' : 'showRight';
-  const title = `${side === 'left' ? 'Erste' : 'Zweite'} Datei ein-/ausblenden: ${source.description}`;
+  const title = `Show / hide the ${side === 'left' ? 'first' : 'second'} file: ${source.description}`;
   return /* html */ `
     <button id="${id}" class="documentToggle" title="${escapeHtml(title)}" aria-pressed="true">
       <span class="swatch ${side}"></span><span class="documentName">${escapeHtml(source.name)}</span>
@@ -464,7 +540,7 @@ function buildHtml(
   ].join('; ');
 
   return /* html */ `<!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="${csp}">
@@ -483,18 +559,18 @@ ${body}
 
 // Toolbar controls shared by the single viewer and the compare view.
 const NAVIGATION_CONTROLS = /* html */ `
-    <button id="prev" title="Vorherige Seite">&#x2039;</button>
-    <button id="next" title="Nächste Seite">&#x203A;</button>
-    <input id="pageNumber" type="number" min="1" value="1" title="Seite">
+    <button id="prev" title="Previous page">&#x2039;</button>
+    <button id="next" title="Next page">&#x203A;</button>
+    <input id="pageNumber" type="number" min="1" value="1" title="Page">
     <span id="pageCount">/ –</span>`;
 
 const ZOOM_CONTROLS = /* html */ `
-    <button id="zoomOut" title="Verkleinern">&minus;</button>
-    <button id="zoomIn" title="Vergrößern">+</button>
+    <button id="zoomOut" title="Zoom out">&minus;</button>
+    <button id="zoomIn" title="Zoom in">+</button>
     <select id="scale" title="Zoom">
-      <option value="auto">Automatisch</option>
-      <option value="page-width">Seitenbreite</option>
-      <option value="page-fit">Ganze Seite</option>
+      <option value="auto">Automatic</option>
+      <option value="page-width">Page width</option>
+      <option value="page-fit">Whole page</option>
       <option value="0.5">50 %</option>
       <option value="0.75">75 %</option>
       <option value="1">100 %</option>
@@ -503,18 +579,18 @@ const ZOOM_CONTROLS = /* html */ `
       <option value="4">400 %</option>
       <option id="customScale" value="custom" hidden></option>
     </select>
-    <button id="rotateLeft" title="Nach links drehen">
+    <button id="rotateLeft" title="Rotate left">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
     </button>
-    <button id="rotateRight" title="Nach rechts drehen">
+    <button id="rotateRight" title="Rotate right">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
     </button>`;
 
 const TOOL_CONTROLS = /* html */ `
-    <button id="toolSelect" title="Textauswahl" aria-pressed="true">
+    <button id="toolSelect" title="Text selection" aria-pressed="true">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h3a1 1 0 0 1 1 1a1 1 0 0 1 1-1h3M8 20h3a1 1 0 0 0 1-1a1 1 0 0 0 1 1h3M12 5v14M10 12h4"/></svg>
     </button>
-    <button id="toolHand" title="Seite mit der Maus verschieben" aria-pressed="false">
+    <button id="toolHand" title="Drag the page with the mouse" aria-pressed="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
     </button>`;
 
@@ -523,13 +599,13 @@ const VIEWER_BODY = /* html */ `
     <span class="spacer"></span>${ZOOM_CONTROLS}
     <span class="separator"></span>${TOOL_CONTROLS}
     <span class="separator"></span>
-    <button id="comparePrevious" title="Mit der Version vor dem letzten Neuladen vergleichen (noch keine frühere Version)" disabled>
+    <button id="comparePrevious" title="Compare with the version before the last reload (no earlier version yet)" disabled>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
     </button>
     <span class="spacer"></span>
-    <input id="findInput" type="search" placeholder="Suchen (Strg+F)">
-    <button id="findPrev" title="Vorheriger Treffer">&#x2191;</button>
-    <button id="findNext" title="Nächster Treffer">&#x2193;</button>
+    <input id="findInput" type="search" placeholder="Find (Ctrl+F)">
+    <button id="findPrev" title="Previous match">&#x2191;</button>
+    <button id="findNext" title="Next match">&#x2193;</button>
     <span id="findCount"></span>
   </div>
   <div id="viewerContainer" tabindex="0">
@@ -542,11 +618,11 @@ const compareBody = (leftToggle: string, rightToggle: string): string => /* html
     <span class="separator"></span>${TOOL_CONTROLS}
     <span class="spacer"></span>${leftToggle}${rightToggle}
     <span class="separator"></span>
-    <button id="diffToggle" title="Unterschiede markieren" aria-pressed="true">
+    <button id="diffToggle" title="Highlight differences" aria-pressed="true">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
     </button>
-    <button id="diffPrev" title="Vorheriger Unterschied (Umschalt+F8)">&#x2191;</button>
-    <button id="diffNext" title="Nächster Unterschied (F8)">&#x2193;</button>
+    <button id="diffPrev" title="Previous difference (Shift+F8)">&#x2191;</button>
+    <button id="diffNext" title="Next difference (F8)">&#x2193;</button>
     <span id="diffStatus"></span>
   </div>
   <div id="viewerContainer" tabindex="0">
