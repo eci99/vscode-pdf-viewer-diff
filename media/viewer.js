@@ -1,10 +1,9 @@
 // @ts-check
+import { MAX_SCALE, MIN_SCALE, enableDragScroll, initPdfjs } from './common.js';
+
 const vscode = acquireVsCodeApi();
 const config = JSON.parse(document.getElementById('config').textContent);
 const $ = (id) => document.getElementById(id);
-
-const MIN_SCALE = 0.1;
-const MAX_SCALE = 10;
 
 function showMessage(text) {
   $('message').textContent = text;
@@ -12,18 +11,8 @@ function showMessage(text) {
 }
 
 async function main() {
-  // pdf_viewer.mjs expects the core library on globalThis.pdfjsLib.
-  const pdfjsLib = await import(config.pdfjs);
-  globalThis.pdfjsLib = pdfjsLib;
-  const { EventBus, PDFViewer, PDFLinkService, PDFFindController, LinkTarget } = await import(
-    config.viewer
-  );
-
-  // Workers cannot be created from the webview resource origin directly,
-  // so the worker script is loaded through a blob URL.
-  const workerCode = await (await fetch(config.worker)).blob();
-  const workerUrl = URL.createObjectURL(new Blob([workerCode], { type: 'text/javascript' }));
-  pdfjsLib.GlobalWorkerOptions.workerPort = new Worker(workerUrl, { type: 'module' });
+  const { viewerLib, openDocument } = await initPdfjs(config);
+  const { EventBus, PDFViewer, PDFLinkService, PDFFindController, LinkTarget } = viewerLib;
 
   const container = $('viewerContainer');
   const eventBus = new EventBus();
@@ -38,7 +27,7 @@ async function main() {
   });
   linkService.setViewer(viewer);
 
-  /** @type {{ page?: number, scale?: string, tool?: string }} */
+  /** @type {{ page?: number, scale?: string, rotation?: number, tool?: string }} */
   let state = vscode.getState() ?? {};
   let pdfDocument = null;
   let loadingTask = null;
@@ -53,17 +42,7 @@ async function main() {
     const previousTask = loadingTask;
     let task;
     try {
-      task = loadingTask = pdfjsLib.getDocument({
-        data: new Uint8Array(data),
-        cMapUrl: config.cMapUrl,
-        cMapPacked: true,
-        standardFontDataUrl: config.standardFontDataUrl,
-        wasmUrl: config.wasmUrl,
-        iccUrl: config.iccUrl,
-        // Requests from the blob worker are not served by the webview's
-        // resource handler, so fonts/cmaps/wasm are fetched on the main thread.
-        useWorkerFetch: false,
-      });
+      task = loadingTask = openDocument(data);
       const doc = await task.promise;
       if (task !== loadingTask) {
         void task.destroy(); // superseded by a newer load
@@ -74,6 +53,7 @@ async function main() {
       eventBus.on(
         'pagesinit',
         () => {
+          viewer.pagesRotation = state.rotation ?? 0;
           viewer.currentScaleValue = keep.scale ?? 'auto';
           viewer.currentPageNumber = Math.min(keep.page ?? 1, doc.numPages);
           if (keep.scrollTop !== undefined) {
@@ -87,6 +67,7 @@ async function main() {
       $('pageCount').textContent = `/ ${doc.numPages}`;
       $('pageNumber').max = String(doc.numPages);
       void previousTask?.destroy();
+      vscode.postMessage({ type: 'loaded' });
     } catch (err) {
       if (task && task !== loadingTask) {
         return; // superseded by a newer load
@@ -121,6 +102,16 @@ async function main() {
   };
   $('zoomIn').addEventListener('click', () => viewer.increaseScale());
   $('zoomOut').addEventListener('click', () => viewer.decreaseScale());
+
+  // --- Rotation ---
+  const rotate = (delta) => {
+    viewer.pagesRotation = (viewer.pagesRotation + delta + 360) % 360;
+    state = { ...state, rotation: viewer.pagesRotation };
+    vscode.setState(state);
+  };
+  $('rotateLeft').addEventListener('click', () => rotate(-90));
+  $('rotateRight').addEventListener('click', () => rotate(90));
+
   $('scale').addEventListener('change', (e) => {
     viewer.currentScaleValue = e.target.value;
   });
@@ -176,34 +167,7 @@ async function main() {
   $('toolSelect').addEventListener('click', () => setTool('select'));
   $('toolHand').addEventListener('click', () => setTool('hand'));
 
-  let drag = null;
-  container.addEventListener('pointerdown', (e) => {
-    if (!handTool || e.button !== 0 || e.target.closest('a, input, select, textarea, button')) {
-      return;
-    }
-    const rect = container.getBoundingClientRect();
-    if (
-      e.clientX - rect.left >= container.clientWidth ||
-      e.clientY - rect.top >= container.clientHeight
-    ) {
-      return; // click on a scrollbar
-    }
-    drag = { x: e.clientX, y: e.clientY, left: container.scrollLeft, top: container.scrollTop };
-    container.setPointerCapture(e.pointerId);
-    container.classList.add('grabbing');
-  });
-  container.addEventListener('pointermove', (e) => {
-    if (drag) {
-      container.scrollLeft = drag.left - (e.clientX - drag.x);
-      container.scrollTop = drag.top - (e.clientY - drag.y);
-    }
-  });
-  const endDrag = () => {
-    drag = null;
-    container.classList.remove('grabbing');
-  };
-  container.addEventListener('pointerup', endDrag);
-  container.addEventListener('pointercancel', endDrag);
+  enableDragScroll(container, () => handTool);
 
   // --- Find ---
   const find = (type, findPrevious = false) => {
@@ -265,10 +229,17 @@ async function main() {
     const msg = e.data;
     if (msg.type === 'load') {
       void load(msg.data);
+    } else if (msg.type === 'previous') {
+      // The extension keeps the version shown before the last reload.
+      $('comparePrevious').disabled = !msg.available;
+      $('comparePrevious').title = msg.available
+        ? 'Mit der Version vor dem letzten Neuladen vergleichen'
+        : 'Mit der Version vor dem letzten Neuladen vergleichen (noch keine frühere Version)';
     } else if (msg.type === 'error') {
       showMessage(`Datei konnte nicht gelesen werden: ${msg.message}`);
     }
   });
+  $('comparePrevious').addEventListener('click', () => vscode.postMessage({ type: 'comparePrevious' }));
 
   vscode.postMessage({ type: 'ready' });
 }

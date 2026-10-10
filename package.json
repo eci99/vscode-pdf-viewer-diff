@@ -30,6 +30,82 @@
           }
         ],
         "priority": "default"
+      },
+      {
+        "viewType": "pdfViewer.compare",
+        "displayName": "PDF-Vergleich",
+        "selector": [
+          {
+            "filenamePattern": "*.pdfdiff"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "pdfViewer.compare",
+        "title": "PDF vergleichen mit…",
+        "category": "PDF Viewer",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "pdfViewer.nextDifference",
+        "title": "Zum nächsten Unterschied",
+        "category": "PDF Viewer"
+      },
+      {
+        "command": "pdfViewer.previousDifference",
+        "title": "Zum vorherigen Unterschied",
+        "category": "PDF Viewer"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "pdfViewer.compare",
+          "when": "resourceExtname == .pdf",
+          "group": "3_compare"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "pdfViewer.compare",
+          "when": "activeCustomEditorId == pdfViewer.preview",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "pdfViewer.nextDifference",
+          "when": "activeCustomEditorId == pdfViewer.compare"
+        },
+        {
+          "command": "pdfViewer.previousDifference",
+          "when": "activeCustomEditorId == pdfViewer.compare"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "pdfViewer.nextDifference",
+        "key": "f8",
+        "when": "activeCustomEditorId == pdfViewer.compare"
+      },
+      {
+        "command": "pdfViewer.previousDifference",
+        "key": "shift+f8",
+        "when": "activeCustomEditorId == pdfViewer.compare"
+      },
+      {
+        "command": "pdfViewer.nextDifference",
+        "key": "alt+f8",
+        "when": "activeCustomEditorId == pdfViewer.compare"
+      },
+      {
+        "command": "pdfViewer.previousDifference",
+        "key": "shift+alt+f8",
+        "when": "activeCustomEditorId == pdfViewer.compare"
       }
     ]
   },

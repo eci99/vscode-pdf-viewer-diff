@@ -24,8 +24,13 @@ body {
   white-space: nowrap;
 }
 
+/* Controls keep their size; only the spacers and long texts give way. */
+#toolbar > * {
+  flex: none;
+}
+
 #toolbar .spacer {
-  flex: 1;
+  flex: 1 1 0;
 }
 
 #toolbar button {
@@ -43,6 +48,12 @@ body {
 
 #toolbar button:hover {
   background: var(--vscode-toolbar-hoverBackground);
+}
+
+#toolbar button:disabled {
+  opacity: 0.4;
+  background: transparent;
+  cursor: default;
 }
 
 #toolbar button[aria-pressed='true'] {
@@ -119,16 +130,168 @@ body {
 }
 
 /* Hand tool: drag to scroll instead of selecting text */
-#viewerContainer.handTool,
-#viewerContainer.handTool .textLayer,
-#viewerContainer.handTool .textLayer * {
+.handTool,
+.handTool .textLayer,
+.handTool .textLayer * {
   cursor: grab;
   user-select: none;
 }
 
-#viewerContainer.handTool.grabbing,
-#viewerContainer.handTool.grabbing * {
+.handTool.grabbing,
+.handTool.grabbing * {
   cursor: grabbing;
+}
+
+/* Compare view: both documents on top of each other */
+#toolbar .documentToggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 64px;
+  max-width: 160px;
+  font-size: inherit;
+}
+
+.documentName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.documentToggle[aria-pressed='false'] .documentName {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.swatch.left {
+  background: #e00000;
+}
+
+.swatch.right {
+  background: #009a00;
+}
+
+/* Where the two pages differ (.diffPage, masked by --diff-mask) the documents
+   are tinted and multiplied; everywhere else the page is left untouched.
+   Tints turn the black of a document into its colour and leave white alone.
+   (pdf.js uses .page::after for its loading icon, hence ::before.) */
+.tint,
+.compare .pdfViewer .page::before {
+  position: absolute;
+  inset: 0;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.compare .pdfViewer .page::before {
+  content: '';
+  display: none;
+  z-index: 1;
+  background: var(--main-tint);
+  -webkit-mask: var(--diff-mask) 0 0 / var(--diff-mask-size) no-repeat;
+  mask: var(--diff-mask) 0 0 / var(--diff-mask-size) no-repeat;
+}
+
+.compare:not(.hideMain, .hideOther) .pdfViewer .page.diffPage::before {
+  display: block;
+}
+
+/* The other document, multiplied onto the one shown by the viewer. */
+.otherLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  isolation: isolate;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.otherLayer canvas {
+  display: block;
+}
+
+.otherLayer .tint {
+  background: var(--other-tint);
+}
+
+.compare:not(.hideMain) .otherLayer {
+  -webkit-mask: var(--diff-mask) 0 0 / var(--diff-mask-size-other) no-repeat;
+  mask: var(--diff-mask) 0 0 / var(--diff-mask-size-other) no-repeat;
+}
+
+.compare:not(.hideMain) .page:not(.diffPage) > .otherLayer,
+.hideOther .otherLayer,
+.hideMain .tint,
+.hideOther .tint {
+  display: none;
+}
+
+.hideMain .pdfViewer .canvasWrapper {
+  visibility: hidden;
+}
+
+.diffMarks {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  image-rendering: pixelated;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.hideMarks .diffMarks {
+  display: none;
+}
+
+/* Frame around the difference last jumped to: closes in on it, then pulses */
+.diffFocus {
+  position: absolute;
+  z-index: 4;
+  box-sizing: border-box;
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
+  border-radius: 2px;
+  pointer-events: none;
+  animation:
+    diffFocusIn 0.35s ease-out,
+    diffFocusPulse 0.9s ease-in-out 0.35s infinite alternate;
+}
+
+@keyframes diffFocusIn {
+  from {
+    outline-offset: 18px;
+    opacity: 0;
+  }
+}
+
+@keyframes diffFocusPulse {
+  to {
+    outline-offset: 5px;
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .diffFocus {
+    animation: none;
+  }
+}
+
+#diffStatus {
+  flex: 0 1 190px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.8;
 }
 
 #message {
