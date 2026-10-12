@@ -587,10 +587,10 @@ const ZOOM_CONTROLS = /* html */ `
     </button>`;
 
 const TOOL_CONTROLS = /* html */ `
-    <button id="toolSelect" title="Text selection" aria-pressed="true">
+    <button id="toolSelect" title="Text selection" aria-pressed="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h3a1 1 0 0 1 1 1a1 1 0 0 1 1-1h3M8 20h3a1 1 0 0 0 1-1a1 1 0 0 0 1 1h3M12 5v14M10 12h4"/></svg>
     </button>
-    <button id="toolHand" title="Drag the page with the mouse" aria-pressed="false">
+    <button id="toolHand" title="Drag the page with the mouse" aria-pressed="true">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
     </button>`;
 

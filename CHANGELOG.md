@@ -2,6 +2,12 @@
 
 All notable changes to this extension are documented in this file.
 
+## 0.1.1 – 2026-10-12
+
+- Renamed to "PDF View & Compare"; the commands are now listed under that name in the Command Palette.
+- The hand tool (drag the page with the mouse) is now the default instead of text selection.
+- Reloading a changed PDF keeps the horizontal scroll position too, in the viewer and in the comparison.
+
 ## 0.1.0 – 2026-10-10
 
 First version.

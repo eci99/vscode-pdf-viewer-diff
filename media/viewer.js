@@ -38,7 +38,7 @@ async function main() {
   };
 
   async function load(data) {
-    const keep = pdfDocument ? { ...state, scrollTop: container.scrollTop } : state;
+    const keep = pdfDocument ? { ...state, scrollTop: container.scrollTop, scrollLeft: container.scrollLeft } : state;
     const previousTask = loadingTask;
     let task;
     try {
@@ -58,6 +58,7 @@ async function main() {
           viewer.currentPageNumber = Math.min(keep.page ?? 1, doc.numPages);
           if (keep.scrollTop !== undefined) {
             container.scrollTop = keep.scrollTop;
+            container.scrollLeft = keep.scrollLeft;
           }
         },
         { once: true },
@@ -150,7 +151,7 @@ async function main() {
   // --- Tool: text selection or hand (drag to scroll) ---
   let handTool = false;
   const applyTool = (tool) => {
-    handTool = tool === 'hand';
+    handTool = tool !== 'select';
     container.classList.toggle('handTool', handTool);
     $('toolSelect').setAttribute('aria-pressed', String(!handTool));
     $('toolHand').setAttribute('aria-pressed', String(handTool));

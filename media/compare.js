@@ -135,7 +135,7 @@ async function main() {
   // --- Tool: text selection or hand (drag to scroll) ---
   let handTool = false;
   const applyTool = (tool) => {
-    handTool = tool === 'hand';
+    handTool = tool !== 'select';
     container.classList.toggle('handTool', handTool);
     $('toolSelect').setAttribute('aria-pressed', String(!handTool));
     $('toolHand').setAttribute('aria-pressed', String(handTool));
@@ -624,6 +624,7 @@ async function main() {
     if (viewerDoc !== mainDoc) {
       const first = !viewerDoc;
       const scrollTop = container.scrollTop;
+      const scrollLeft = container.scrollLeft;
       viewerDoc = mainDoc;
       otherRenders.clear();
       eventBus.on(
@@ -635,6 +636,7 @@ async function main() {
             viewer.currentPageNumber = Math.min(state.page ?? 1, mainDoc.numPages);
           } else {
             container.scrollTop = scrollTop;
+            container.scrollLeft = scrollLeft;
           }
         },
         { once: true },
