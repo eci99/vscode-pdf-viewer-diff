@@ -57,8 +57,13 @@ async function main() {
           viewer.currentScaleValue = keep.scale ?? 'auto';
           viewer.currentPageNumber = Math.min(keep.page ?? 1, doc.numPages);
           if (keep.scrollTop !== undefined) {
-            container.scrollTop = keep.scrollTop;
-            container.scrollLeft = keep.scrollLeft;
+            const restoreScroll = () => {
+              container.scrollTop = keep.scrollTop;
+              container.scrollLeft = keep.scrollLeft;
+            };
+            restoreScroll();
+            // The scrollable width is only final once pages are laid out; before that scrollLeft is clamped.
+            eventBus.on('pagerendered', () => requestAnimationFrame(restoreScroll), { once: true });
           }
         },
         { once: true },
