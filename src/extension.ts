@@ -1,4 +1,6 @@
 import * as crypto from 'crypto';
+import { execFile } from 'child_process';
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -35,10 +37,31 @@ export function deactivate(): void {}
 const isPdf = (uri: vscode.Uri): boolean => uri.path.toLowerCase().endsWith('.pdf');
 const baseName = (uri: vscode.Uri): string => uri.path.split('/').pop()!;
 
+// A version from git of a file that is stored in Git LFS is only the small pointer file.
+const LFS_POINTER = 'version https://git-lfs.github.com/spec/';
+
+function resolveLfsPointer(uri: vscode.Uri, bytes: Uint8Array): Promise<Uint8Array> {
+  if (bytes.length > 1024 || !Buffer.from(bytes).toString('utf8').startsWith(LFS_POINTER)) {
+    return Promise.resolve(bytes);
+  }
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      'git',
+      ['lfs', 'smudge'],
+      { cwd: path.dirname(uri.fsPath), encoding: 'buffer', maxBuffer: 1024 * 1024 * 1024 },
+      (err, stdout) => (err ? reject(new Error(`git lfs smudge failed: ${err.message}`)) : resolve(stdout)),
+    );
+    child.stdin?.end(Buffer.from(bytes));
+  });
+}
+
 // The file is read through workspace.fs so that remote and virtual
 // file systems (SSH, WSL, git: URIs, ...) work as well.
 async function readPdf(uri: vscode.Uri): Promise<ArrayBuffer> {
-  const bytes = await vscode.workspace.fs.readFile(uri);
+  let bytes = await vscode.workspace.fs.readFile(uri);
+  if (uri.scheme === GIT_SCHEME) {
+    bytes = await resolveLfsPointer(uri, bytes);
+  }
   // readFile may return a Node Buffer, which postMessage would serialize
   // as JSON; a plain ArrayBuffer is transferred as binary.
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
@@ -150,7 +173,7 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
     openCompare(fileSource(original), fileSource(modified), {
       viewColumn: panel.viewColumn,
       preview: tab.isPreview,
-    }).then(
+    }, `compare: ${baseName(modified)} (git)`).then(
       // If the diff was a preview tab, the comparison has replaced it already.
       () => vscode.window.tabGroups.close(tab).then(undefined, () => {}),
       () => {},
@@ -178,6 +201,8 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
               data: document.previous,
             },
             { name, description: vscode.workspace.asRelativePath(document.uri), uri: document.uri },
+            {},
+            `compare: ${name} (before)`,
           );
         }
       }),
@@ -273,29 +298,58 @@ const COMPARE_SCHEME = 'pdf-compare';
 interface Comparison {
   left: CompareSource;
   right: CompareSource;
+  /** Replaces the default tab title. */
+  title?: string;
 }
 
 /** Comparisons opened in this session, by id; needed for sources that only exist in memory. */
 const comparisons = new Map<string, Comparison>();
+/** Reloads the documents of an open comparison, by id. */
+const refreshers = new Map<string, () => void>();
 
 function openCompare(
   left: CompareSource,
   right: CompareSource,
   options: vscode.TextDocumentShowOptions = {},
+  title?: string,
 ): Thenable<unknown> {
-  const id = crypto.randomUUID();
-  comparisons.set(id, { left, right });
+  // The same two files give the same URI, so an open comparison of them is shown again.
+  // The same goes for a file and its previous version, which then gets the newer snapshot.
+  const id =
+    left.uri && right.uri && !left.data && !right.data
+      ? `${left.uri}|${right.uri}|${title ?? ''}`
+      : left.data && right.uri && !right.data
+        ? `${right.uri}|previous`
+        : crypto.randomUUID();
+  const existing = comparisons.get(id);
+  if (existing) {
+    Object.assign(existing, { left, right, title });
+    refreshers.get(id)?.();
+  } else {
+    comparisons.set(id, { left, right, title });
+  }
+  const label = title ?? `compare: ${left.name} \u2194 ${right.name}`;
   const uri = vscode.Uri.from({
     scheme: COMPARE_SCHEME,
-    path: `/${left.name} ↔ ${right.name}.pdfdiff`.replace(/(?!^)\//g, '∕'),
+    // A custom editor tab is named after the last segment of the path.
+    path: `/${label}`.replace(/(?!^)\//g, '\u2215'),
     // The file URIs allow restoring the comparison after a restart.
-    query: JSON.stringify({ id, left: left.uri?.toString(), right: right.uri?.toString() }),
+    query: JSON.stringify({ id, left: left.uri?.toString(), right: right.uri?.toString(), title }),
   });
+  // An open comparison is shown where it is, also if it is in another editor group.
+  const open = vscode.window.tabGroups.all.find((group) =>
+    group.tabs.some(
+      (tab) =>
+        tab.input instanceof vscode.TabInputCustom &&
+        tab.input.viewType === CompareEditorProvider.viewType &&
+        tab.input.uri.toString() === uri.toString(),
+    ),
+  );
   return vscode.commands.executeCommand(
     'vscode.openWith',
     uri,
     CompareEditorProvider.viewType,
-    options,
+    open ? { ...options, viewColumn: open.viewColumn } : options,
   );
 }
 
@@ -305,7 +359,12 @@ class CompareDocument implements vscode.CustomDocument {
 
   constructor(readonly uri: vscode.Uri) {
     try {
-      const query = JSON.parse(uri.query) as { id?: string; left?: string; right?: string };
+      const query = JSON.parse(uri.query) as {
+        id?: string;
+        left?: string;
+        right?: string;
+        title?: string;
+      };
       this.id = query.id;
       this.comparison =
         comparisons.get(query.id ?? '') ??
@@ -313,6 +372,7 @@ class CompareDocument implements vscode.CustomDocument {
           ? {
               left: fileSource(vscode.Uri.parse(query.left)),
               right: fileSource(vscode.Uri.parse(query.right)),
+              title: query.title,
             }
           : undefined);
     } catch {
@@ -346,6 +406,7 @@ class CompareEditorProvider implements vscode.CustomReadonlyEditorProvider<Compa
   resolveCustomEditor(document: CompareDocument, panel: vscode.WebviewPanel): void {
     const webview = panel.webview;
     webview.options = webviewOptions(this.extensionUri);
+    panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'images', 'icon.svg');
     const comparison = document.comparison;
     if (!comparison) {
       // E.g. a tab restored after a restart whose earlier version only existed in memory.
@@ -357,6 +418,7 @@ class CompareEditorProvider implements vscode.CustomReadonlyEditorProvider<Compa
       const { data, uri } = comparison[side];
       return sendPdf(webview, () => data ?? readPdf(uri!), { side });
     };
+
     // The tab closes itself when one of the files is gone.
     const closeIfFileMissing = async (): Promise<void> => {
       for (const { uri } of [comparison.left, comparison.right]) {
@@ -397,8 +459,17 @@ class CompareEditorProvider implements vscode.CustomReadonlyEditorProvider<Compa
       }
     }
     this.panels.add(panel);
+    if (document.id) {
+      refreshers.set(document.id, () => {
+        void send('left');
+        void send('right');
+      });
+    }
     panel.onDidDispose(() => {
       this.panels.delete(panel);
+      if (document.id) {
+        refreshers.delete(document.id);
+      }
       this.differences.delete(document.uri);
       disposables.forEach((d) => d.dispose());
     });
@@ -619,7 +690,7 @@ const compareBody = (leftToggle: string, rightToggle: string): string => /* html
     <span class="spacer"></span>${leftToggle}${rightToggle}
     <span class="separator"></span>
     <button id="diffToggle" title="Highlight differences" aria-pressed="true">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 11-6 6v3h9l3-3" stroke="#f5c400" fill="#f5c400"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
     </button>
     <button id="diffPrev" title="Previous difference (Shift+F8)">&#x2191;</button>
     <button id="diffNext" title="Next difference (F8)">&#x2193;</button>

@@ -481,6 +481,15 @@ async function main() {
         `on ${pages} ${pages === 1 ? 'page' : 'pages'}`;
     }
     $('diffStatus').textContent = text;
+    // Without differences there is nothing to show, hide, or jump to.
+    for (const id of ['diffToggle', 'diffPrev', 'diffNext', 'showLeft', 'showRight']) {
+      $(id).disabled = !diffs.length;
+    }
+    if (diffResults.length && done === diffResults.length && !diffs.length && (!show.left || !show.right)) {
+      // A hidden document could not be shown again with the buttons disabled.
+      show.left = show.right = true;
+      applyVisibility();
+    }
     reportDifferences(diffs);
   };
 
@@ -613,6 +622,15 @@ async function main() {
   $('diffNext').addEventListener('click', () => goToDiff(1));
 
   // --- Loading ---
+  // The scroll position to come back to after a reload. It is kept until the new pages are
+  // rendered, because both documents often reload one after the other.
+  let savedScroll = null;
+  const restoreScroll = () => {
+    if (savedScroll) {
+      container.scrollTop = savedScroll.top;
+      container.scrollLeft = savedScroll.left;
+    }
+  };
   // Called whenever a document was (re)loaded; nothing is shown before both are there.
   const rebuild = () => {
     if (!docs.left || !docs.right) {
@@ -623,8 +641,9 @@ async function main() {
     const mainDoc = docs[mainSide];
     if (viewerDoc !== mainDoc) {
       const first = !viewerDoc;
-      const scrollTop = container.scrollTop;
-      const scrollLeft = container.scrollLeft;
+      if (!first && !savedScroll) {
+        savedScroll = { top: container.scrollTop, left: container.scrollLeft };
+      }
       viewerDoc = mainDoc;
       otherRenders.clear();
       eventBus.on(
@@ -635,8 +654,17 @@ async function main() {
           if (first) {
             viewer.currentPageNumber = Math.min(state.page ?? 1, mainDoc.numPages);
           } else {
-            container.scrollTop = scrollTop;
-            container.scrollLeft = scrollLeft;
+            restoreScroll();
+            // The scrollable size is only final once the pages are laid out; before that the position is clamped.
+            eventBus.on(
+              'pagerendered',
+              () =>
+                requestAnimationFrame(() => {
+                  restoreScroll();
+                  savedScroll = null;
+                }),
+              { once: true },
+            );
           }
         },
         { once: true },
