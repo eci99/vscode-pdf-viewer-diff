@@ -2,6 +2,19 @@
 
 All notable changes to this extension are documented in this file.
 
+## 0.1.2 – 2026-10-16
+
+- New toolbar button to go back to the start: page 1, automatic zoom, scrolled to the top left.
+- The find controls are now behind a search button (or `Ctrl`+`F`) and get a row of their own; `Escape` closes them and clears the search.
+- Text search in the comparison too.
+- The toolbar wraps in groups when the editor is narrow.
+- Comparison tabs are named `compare: a.pdf ↔ b.pdf` (`… (git)` for a Source Control diff, `… (before)` for the version before the last reload) and show the extension icon.
+- Comparing the same files again brings the open comparison to the front, also if it is in another editor group, instead of opening a second one. Comparing with the version before the last reload updates an open comparison of that file.
+- The comparison keeps its scroll position when the files change on disk.
+- PDFs stored in Git LFS can be compared in the Source Control view: the LFS pointer of the committed version is resolved with `git lfs smudge`.
+- Without differences, the buttons for hiding a file, highlighting and jumping between differences are disabled.
+- Fixed: after a reload the horizontal scroll position was sometimes lost because it was restored before the pages were laid out.
+
 ## 0.1.1 – 2026-10-12
 
 - Renamed to "PDF View & Compare"; the commands are now listed under that name in the Command Palette.
