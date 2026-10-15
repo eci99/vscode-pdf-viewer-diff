@@ -9,12 +9,13 @@ body {
 #toolbar {
   position: absolute;
   inset: 0 0 auto 0;
-  height: 32px;
+  min-height: 32px;
   box-sizing: border-box;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  padding: 0 8px;
+  padding: 4px 40px 4px 8px;
   background: var(--vscode-editorWidget-background);
   border-bottom: 1px solid var(--vscode-editorWidget-border, transparent);
   color: var(--vscode-foreground);
@@ -26,6 +27,46 @@ body {
 
 /* Controls keep their size; only the spacers and long texts give way. */
 #toolbar > * {
+  flex: none;
+}
+
+/* A group is never split when the toolbar wraps. */
+#toolbar .group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#toolbar .group > :not(#diffStatus):not(.spacer) {
+  flex: none;
+}
+
+/* The find button stays at the top right, in the space that the toolbar leaves for it. */
+#toolbar > #findToggle {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+}
+
+/* The find controls follow the others, at the right. They get a row of their own while the
+   other controls fit in one row (set by trackToolbarHeight); otherwise they use what is left. */
+#toolbar > .findRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-left: auto;
+}
+
+#toolbar > .findRow.ownRow {
+  flex: 0 0 100%;
+}
+
+#toolbar > .findRow[hidden] {
+  display: none;
+}
+
+#toolbar > .findRow > * {
   flex: none;
 }
 
@@ -123,7 +164,7 @@ body {
 /* pdf.js requires an absolutely positioned scroll container */
 #viewerContainer {
   position: absolute;
-  inset: 32px 0 0 0;
+  inset: var(--toolbar-height, 32px) 0 0 0;
   overflow: auto;
   background: var(--vscode-editor-background);
   outline: none;
@@ -296,7 +337,7 @@ body {
 
 #message {
   position: absolute;
-  inset: 32px 0 0 0;
+  inset: var(--toolbar-height, 32px) 0 0 0;
   display: flex;
   align-items: center;
   justify-content: center;

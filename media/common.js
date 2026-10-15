@@ -38,6 +38,85 @@ export async function initPdfjs(config) {
 }
 
 /**
+ * Wires up the find controls of the toolbar: the input, the buttons, the match count, and Ctrl+F.
+ * The row with them is shown with the button in the toolbar or with Ctrl+F, and hiding it ends the search.
+ * @param {any} eventBus
+ * @param {HTMLElement} container scroll container, gets the focus after Escape
+ */
+export function setupFind(eventBus, container) {
+  const $ = (/** @type {string} */ id) => /** @type {HTMLInputElement} */ (document.getElementById(id));
+  const find = (/** @type {string} */ type, findPrevious = false) => {
+    eventBus.dispatch('find', {
+      source: window,
+      type,
+      query: $('findInput').value,
+      caseSensitive: false,
+      entireWord: false,
+      highlightAll: true,
+      findPrevious,
+    });
+  };
+  $('findInput').addEventListener('input', () => find(''));
+  const setFindVisible = (/** @type {boolean} */ visible) => {
+    $('findRow').hidden = !visible;
+    $('findToggle').setAttribute('aria-pressed', String(visible));
+    if (visible) {
+      $('findInput').focus();
+      $('findInput').select();
+    } else {
+      $('findInput').value = '';
+      find('');
+    }
+  };
+  $('findToggle').addEventListener('click', () => setFindVisible($('findRow').hidden));
+  $('findInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      find('again', e.shiftKey);
+    } else if (e.key === 'Escape') {
+      setFindVisible(false);
+      container.focus();
+    }
+  });
+  $('findNext').addEventListener('click', () => find('again'));
+  $('findPrev').addEventListener('click', () => find('again', true));
+  const updateFindCount = ({ matchesCount }) => {
+    $('findCount').textContent =
+      $('findInput').value && matchesCount?.total
+        ? `${matchesCount.current} / ${matchesCount.total}`
+        : '';
+  };
+  eventBus.on('updatefindmatchescount', updateFindCount);
+  eventBus.on('updatefindcontrolstate', (e) => {
+    // FindState.NOT_FOUND === 1
+    $('findInput').classList.toggle('notFound', e.state === 1 && !!$('findInput').value);
+    updateFindCount(e);
+  });
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+      e.preventDefault();
+      setFindVisible(true);
+    }
+  });
+}
+
+/**
+ * Keeps the content below the toolbar, which becomes two rows when it is too narrow.
+ * The height is available to the stylesheet as --toolbar-height.
+ */
+export function trackToolbarHeight() {
+  const toolbar = /** @type {HTMLElement} */ (document.getElementById('toolbar'));
+  const groups = /** @type {HTMLElement[]} */ ([...toolbar.children]).filter((child) => child.classList.contains('group'));
+  const findRow = document.getElementById('findRow');
+  new ResizeObserver(() => {
+    document.body.style.setProperty('--toolbar-height', `${toolbar.offsetHeight}px`);
+    // The find controls get a row of their own unless the other controls already fill two rows.
+    const centers = groups.map((group) => group.offsetTop + group.offsetHeight / 2);
+    const wrapped = Math.max(...centers) - Math.min(...centers) > 8;
+    findRow?.classList.toggle('ownRow', !wrapped);
+  }).observe(toolbar);
+}
+
+/**
  * Hand tool: lets the user drag the page with the mouse while isActive() is true.
  * @param {HTMLElement} container scroll container
  * @param {() => boolean} isActive

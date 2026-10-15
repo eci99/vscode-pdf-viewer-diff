@@ -5,7 +5,7 @@
 // Tinting one document red and the other green and multiplying the layers
 // makes identical content black, while differences keep their colour. This
 // is only done where the pages differ; everywhere else the page stays as it is.
-import { MAX_SCALE, MIN_SCALE, enableDragScroll, initPdfjs } from './common.js';
+import { MAX_SCALE, MIN_SCALE, enableDragScroll, initPdfjs, setupFind, trackToolbarHeight } from './common.js';
 
 const vscode = acquireVsCodeApi();
 const config = JSON.parse(document.getElementById('config').textContent);
@@ -34,8 +34,9 @@ function showMessage(text) {
 }
 
 async function main() {
+  trackToolbarHeight();
   const { viewerLib, openDocument } = await initPdfjs(config);
-  const { EventBus, PDFViewer, PDFLinkService, LinkTarget } = viewerLib;
+  const { EventBus, PDFViewer, PDFLinkService, PDFFindController, LinkTarget } = viewerLib;
 
   /** @type {{ page?: number, scale?: string, rotation?: number, tool?: string, showLeft?: boolean, showRight?: boolean, showMarks?: boolean }} */
   let state = vscode.getState() ?? {};
@@ -48,8 +49,11 @@ async function main() {
   const container = $('viewerContainer');
   const eventBus = new EventBus();
   const linkService = new PDFLinkService({ eventBus, externalLinkTarget: LinkTarget.BLANK });
-  const viewer = new PDFViewer({ container, viewer: $('viewer'), eventBus, linkService });
+  // The text that is searched is that of the document the viewer shows.
+  const findController = new PDFFindController({ eventBus, linkService });
+  const viewer = new PDFViewer({ container, viewer: $('viewer'), eventBus, linkService, findController });
   linkService.setViewer(viewer);
+  setupFind(eventBus, container);
 
   const docs = { left: null, right: null };
   const tasks = { left: null, right: null };
@@ -116,6 +120,17 @@ async function main() {
       viewer.currentScaleValue = value;
     }
   }).observe(container);
+
+  // --- Back to the start ---
+  $('resetView').addEventListener('click', () => {
+    if (!viewerDoc) {
+      return;
+    }
+    viewer.currentScaleValue = 'auto';
+    viewer.currentPageNumber = 1;
+    container.scrollTop = 0;
+    container.scrollLeft = 0;
+  });
 
   // --- Rotation ---
   /** Rotation to render a page with: its own one plus the one chosen in the toolbar. */

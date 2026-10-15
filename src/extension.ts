@@ -629,6 +629,11 @@ ${body}
 }
 
 // Toolbar controls shared by the single viewer and the compare view.
+const RESET_VIEW_BUTTON = /* html */ `
+    <button id="resetView" title="Back to the start with automatic zoom">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14"/><path d="m18 13-6-6-6 6"/><path d="M12 7v14"/></svg>
+    </button>`;
+
 const NAVIGATION_CONTROLS = /* html */ `
     <button id="prev" title="Previous page">&#x2039;</button>
     <button id="next" title="Next page">&#x203A;</button>
@@ -665,36 +670,50 @@ const TOOL_CONTROLS = /* html */ `
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
     </button>`;
 
-const VIEWER_BODY = /* html */ `
-  <div id="toolbar">${NAVIGATION_CONTROLS}
-    <span class="spacer"></span>${ZOOM_CONTROLS}
-    <span class="separator"></span>${TOOL_CONTROLS}
-    <span class="separator"></span>
-    <button id="comparePrevious" title="Compare with the version before the last reload (no earlier version yet)" disabled>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
-    </button>
-    <span class="spacer"></span>
+const FIND_CONTROLS = /* html */ `
     <input id="findInput" type="search" placeholder="Find (Ctrl+F)">
     <button id="findPrev" title="Previous match">&#x2191;</button>
     <button id="findNext" title="Next match">&#x2193;</button>
-    <span id="findCount"></span>
+    <span id="findCount"></span>`;
+
+// The button shows the row with the find controls, which is the last row of the toolbar.
+const FIND_TOGGLE = /* html */ `
+    <button id="findToggle" title="Find (Ctrl+F)" aria-pressed="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+    </button>`;
+const FIND_ROW = /* html */ `
+    <div id="findRow" class="findRow" hidden>${FIND_CONTROLS}</div>`;
+
+const VIEWER_BODY = /* html */ `
+  <div id="toolbar">
+    <div class="group">${RESET_VIEW_BUTTON}${NAVIGATION_CONTROLS}</div>
+    <span class="spacer"></span>
+    <div class="group">${ZOOM_CONTROLS}
+    <span class="separator"></span>${TOOL_CONTROLS}</div>
+    <div class="group">
+    <button id="comparePrevious" title="Compare with the version before the last reload (no earlier version yet)" disabled>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
+    </button></div>${FIND_TOGGLE}${FIND_ROW}
   </div>
   <div id="viewerContainer" tabindex="0">
     <div id="viewer" class="pdfViewer"></div>
   </div>`;
 
 const compareBody = (leftToggle: string, rightToggle: string): string => /* html */ `
-  <div id="toolbar">${NAVIGATION_CONTROLS}
-    <span class="spacer"></span>${ZOOM_CONTROLS}
-    <span class="separator"></span>${TOOL_CONTROLS}
-    <span class="spacer"></span>${leftToggle}${rightToggle}
+  <div id="toolbar">
+    <div class="group">${RESET_VIEW_BUTTON}${NAVIGATION_CONTROLS}</div>
+    <span class="spacer"></span>
+    <div class="group">${ZOOM_CONTROLS}
+    <span class="separator"></span>${TOOL_CONTROLS}</div>
+    <span class="spacer"></span>
+    <div class="group">${leftToggle}${rightToggle}
     <span class="separator"></span>
     <button id="diffToggle" title="Highlight differences" aria-pressed="true">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 11-6 6v3h9l3-3" stroke="#f5c400" fill="#f5c400"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
     </button>
     <button id="diffPrev" title="Previous difference (Shift+F8)">&#x2191;</button>
     <button id="diffNext" title="Next difference (F8)">&#x2193;</button>
-    <span id="diffStatus"></span>
+    <span id="diffStatus"></span></div>${FIND_TOGGLE}${FIND_ROW}
   </div>
   <div id="viewerContainer" tabindex="0">
     <div id="viewer" class="pdfViewer"></div>

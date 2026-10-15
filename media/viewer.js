@@ -1,5 +1,5 @@
 // @ts-check
-import { MAX_SCALE, MIN_SCALE, enableDragScroll, initPdfjs } from './common.js';
+import { MAX_SCALE, MIN_SCALE, enableDragScroll, initPdfjs, setupFind, trackToolbarHeight } from './common.js';
 
 const vscode = acquireVsCodeApi();
 const config = JSON.parse(document.getElementById('config').textContent);
@@ -11,6 +11,7 @@ function showMessage(text) {
 }
 
 async function main() {
+  trackToolbarHeight();
   const { viewerLib, openDocument } = await initPdfjs(config);
   const { EventBus, PDFViewer, PDFLinkService, PDFFindController, LinkTarget } = viewerLib;
 
@@ -109,6 +110,17 @@ async function main() {
   $('zoomIn').addEventListener('click', () => viewer.increaseScale());
   $('zoomOut').addEventListener('click', () => viewer.decreaseScale());
 
+  // --- Back to the start ---
+  $('resetView').addEventListener('click', () => {
+    if (!pdfDocument) {
+      return;
+    }
+    viewer.currentScaleValue = 'auto';
+    viewer.currentPageNumber = 1;
+    container.scrollTop = 0;
+    container.scrollLeft = 0;
+  });
+
   // --- Rotation ---
   const rotate = (delta) => {
     viewer.pagesRotation = (viewer.pagesRotation + delta + 360) % 360;
@@ -176,50 +188,12 @@ async function main() {
   enableDragScroll(container, () => handTool);
 
   // --- Find ---
-  const find = (type, findPrevious = false) => {
-    eventBus.dispatch('find', {
-      source: window,
-      type,
-      query: $('findInput').value,
-      caseSensitive: false,
-      entireWord: false,
-      highlightAll: true,
-      findPrevious,
-    });
-  };
-  $('findInput').addEventListener('input', () => find(''));
-  $('findInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      find('again', e.shiftKey);
-    } else if (e.key === 'Escape') {
-      e.target.value = '';
-      find('');
-      container.focus();
-    }
-  });
-  $('findNext').addEventListener('click', () => find('again'));
-  $('findPrev').addEventListener('click', () => find('again', true));
-  const updateFindCount = ({ matchesCount }) => {
-    $('findCount').textContent =
-      $('findInput').value && matchesCount?.total
-        ? `${matchesCount.current} / ${matchesCount.total}`
-        : '';
-  };
-  eventBus.on('updatefindmatchescount', updateFindCount);
-  eventBus.on('updatefindcontrolstate', (e) => {
-    // FindState.NOT_FOUND === 1
-    $('findInput').classList.toggle('notFound', e.state === 1 && !!$('findInput').value);
-    updateFindCount(e);
-  });
+  setupFind(eventBus, container);
 
   // --- Keyboard ---
   window.addEventListener('keydown', (e) => {
     const mod = e.ctrlKey || e.metaKey;
-    if (mod && e.key.toLowerCase() === 'f') {
-      e.preventDefault();
-      $('findInput').focus();
-      $('findInput').select();
-    } else if (mod && (e.key === '+' || e.key === '=')) {
+    if (mod && (e.key === '+' || e.key === '=')) {
       e.preventDefault();
       viewer.increaseScale();
     } else if (mod && e.key === '-') {
