@@ -2,6 +2,11 @@
 
 All notable changes to this extension are documented in this file.
 
+## 0.1.3 – 2026-10-16
+
+- Fixed: comparison tabs showed no icon in the installed extension because the icon was left out of the package.
+- README: demo GIF of the viewer and a comparison from Source Control, and an author's note.
+
 ## 0.1.2 – 2026-10-16
 
 - New toolbar button to go back to the start: page 1, automatic zoom, scrolled to the top left.

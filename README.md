@@ -2,7 +2,13 @@
 
 Displays PDF files directly in the editor and compares two PDFs visually. Rendering is done by [pdf.js](https://mozilla.github.io/pdf.js/).
 
-![A PDF opened in the viewer](images/viewer.png)
+> **Author's note:** You can of course use this extension just to view PDFs, but I designed it
+> for developing them: PDFs that are regenerated often, where you keep looking at particular
+> places in the document. I also wanted to see what has actually changed, especially before
+> committing a PDF. A side-by-side view was not enough for that, because I still had to hunt
+> for the differences myself.
+
+![Zooming, paging and searching in a PDF, then comparing it with the committed version from Source Control](images/demo.gif)
 
 ## Features
 
@@ -90,7 +96,7 @@ The extension code is in `src/extension.ts`. The webviews are plain JavaScript m
 
 ```sh
 npx vsce package
-code --install-extension pdf-viewer-diff-0.1.2.vsix
+code --install-extension pdf-viewer-diff-0.1.3.vsix
 ```
 
 ## License
