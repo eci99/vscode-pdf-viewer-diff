@@ -2,6 +2,16 @@
 
 All notable changes to this extension are documented in this file.
 
+## 0.1.4 – 2026-10-21
+
+- Compare button in the toolbar of the viewer: compares the PDF shown with another file.
+- **PDF Compare** view in the Explorer, shown while a PDF is open: a PDF dropped on it is compared with the PDF in the active editor, two dropped PDFs with each other.
+- Side-by-side view in the comparison: the two files next to each other in their original colours. The differences (marks, frame and jumping between them) are switched on and off with the highlighter and are off by default in this view.
+- Scroll lock for the side-by-side view: both sides scroll and zoom together, page by page, also when the pages have different sizes. It keeps the pages shown when it is switched on next to each other, e.g. page 3 next to page 5, and shows the same part of both pages. Switched off, each side has its own position and zoom. When a file changes on disk, both sides keep their position, with or without the lock.
+- Side by side, the scroll lock and the jumps between differences start from the side last scrolled or clicked.
+- New toolbar button to compare the text instead of the appearance: only added, removed or changed words are marked.
+- Side by side with the scroll lock, the differences are determined for the locked pages, e.g. page 3 with page 5 after two pages were inserted; the Problems view names both page numbers.
+
 ## 0.1.3 – 2026-10-16
 
 - Fixed: comparison tabs showed no icon in the installed extension because the icon was left out of the package.

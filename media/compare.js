@@ -5,6 +5,9 @@
 // Tinting one document red and the other green and multiplying the layers
 // makes identical content black, while differences keep their colour. This
 // is only done where the pages differ; everywhere else the page stays as it is.
+// Side by side, the other document gets a viewer of its own ("second") instead
+// of the layer, and both show their original colours with the marks.
+// Differences are found in the rendered pixels or, if chosen, in the words of the text.
 import { MAX_SCALE, MIN_SCALE, enableDragScroll, initPdfjs, setupFind, trackToolbarHeight } from './common.js';
 
 const vscode = acquireVsCodeApi();
@@ -21,6 +24,8 @@ const MARK_PADDING = 1;
 const GROUP_DISTANCE = 3;
 // Summed RGB difference above which two pixels count as different.
 const PIXEL_THRESHOLD = 48;
+// Above this many word comparisons per page, the changed part of the text is marked as a whole.
+const MAX_TEXT_DIFF = 4000000;
 const MARK_COLOR = '#ffe070';
 // Complementary tints: multiplied they give black.
 const TINT = { left: '#e00000', right: '#009a00' };
@@ -38,7 +43,7 @@ async function main() {
   const { viewerLib, openDocument } = await initPdfjs(config);
   const { EventBus, PDFViewer, PDFLinkService, PDFFindController, LinkTarget } = viewerLib;
 
-  /** @type {{ page?: number, scale?: string, rotation?: number, tool?: string, showLeft?: boolean, showRight?: boolean, showMarks?: boolean }} */
+  /** @type {{ page?: number, scale?: string, rotation?: number, tool?: string, showLeft?: boolean, showRight?: boolean, showMarks?: boolean, sideBySide?: boolean, scrollLock?: boolean, showMarksSideBySide?: boolean, textDiff?: boolean }} */
   let state = vscode.getState() ?? {};
   const updateState = (patch) => {
     state = { ...state, ...patch };
@@ -54,6 +59,40 @@ async function main() {
   const viewer = new PDFViewer({ container, viewer: $('viewer'), eventBus, linkService, findController });
   linkService.setViewer(viewer);
   setupFind(eventBus, container);
+
+  // The viewer of the other document in the side-by-side view. It follows the zoom and
+  // rotation of the main viewer and has no document while the view is not side by side.
+  const secondContainer = $('secondContainer');
+  const secondBus = new EventBus();
+  const secondLinks = new PDFLinkService({ eventBus: secondBus, externalLinkTarget: LinkTarget.BLANK });
+  const secondViewer = new PDFViewer({
+    container: secondContainer,
+    viewer: $('secondViewer'),
+    eventBus: secondBus,
+    linkService: secondLinks,
+  });
+  secondLinks.setViewer(secondViewer);
+  let secondDoc = null;
+  // The second viewer takes the zoom once its pages are set up; pdf.js reports an error before that.
+  let secondReady = false;
+  const containers = [container, secondContainer];
+  // The side the user last scrolled, clicked or focused: the scroll lock and the jumps
+  // between differences start from there.
+  let activeContainer = container;
+  for (const c of containers) {
+    for (const type of ['pointerdown', 'wheel', 'keydown', 'focusin']) {
+      c.addEventListener(
+        type,
+        () => {
+          if (activeContainer !== c) {
+            activeContainer = c;
+            showScale(zoomViewer());
+          }
+        },
+        { passive: true },
+      );
+    }
+  }
 
   const docs = { left: null, right: null };
   const tasks = { left: null, right: null };
@@ -83,53 +122,90 @@ async function main() {
   });
 
   // --- Zoom ---
-  const setScale = (scale) => {
-    viewer.currentScaleValue = String(Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale)));
+  // With the scroll lock, the second viewer takes the zoom of the main one. Without it, each
+  // side has its own zoom, and the controls change that of the active side.
+  const zoomLinked = () => !sideBySide || scrollLock;
+  const zoomViewer = () => (secondReady && !zoomLinked() && activeContainer === secondContainer ? secondViewer : viewer);
+  const setScale = (v, scale) => {
+    v.currentScaleValue = String(Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale)));
   };
-  $('zoomIn').addEventListener('click', () => viewer.increaseScale());
-  $('zoomOut').addEventListener('click', () => viewer.decreaseScale());
+  $('zoomIn').addEventListener('click', () => zoomViewer().increaseScale());
+  $('zoomOut').addEventListener('click', () => zoomViewer().decreaseScale());
   $('scale').addEventListener('change', (e) => {
-    viewer.currentScaleValue = e.target.value;
+    zoomViewer().currentScaleValue = e.target.value;
   });
-  eventBus.on('scalechanging', (e) => {
+  /** Shows the zoom of a viewer in the toolbar. */
+  const showScale = (v) => {
+    if (!v.pdfDocument) {
+      return;
+    }
     const select = $('scale');
-    const value = e.presetValue ?? String(e.scale);
+    const value = v.currentScaleValue;
     const preset = [...select.options].find((o) => o.value === value && o.id !== 'customScale');
     if (preset) {
       select.value = preset.value;
     } else {
-      $('customScale').textContent = `${Math.round(e.scale * 100)} %`;
+      $('customScale').textContent = `${Math.round(v.currentScale * 100)} %`;
       select.value = 'custom';
     }
-    updateState({ scale: viewer.currentScaleValue });
-  });
-  container.addEventListener(
-    'wheel',
-    (e) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        setScale(viewer.currentScale * Math.exp(-e.deltaY / 400));
-      }
-    },
-    { passive: false },
-  );
-  // Keep "fit" presets fitting when the editor is resized.
-  new ResizeObserver(() => {
-    const value = viewer.currentScaleValue;
-    if (viewerDoc && (value === 'auto' || value === 'page-fit' || value === 'page-width')) {
-      viewer.currentScaleValue = value;
+  };
+  eventBus.on('scalechanging', (e) => {
+    if (zoomViewer() === viewer) {
+      showScale(viewer);
     }
-  }).observe(container);
+    updateState({ scale: viewer.currentScaleValue });
+    // The same zoom factor, also for "fit" presets: pages of the same size stay the same size.
+    if (secondReady && zoomLinked()) {
+      secondViewer.currentScale = e.scale;
+    }
+  });
+  secondBus.on('scalechanging', () => {
+    if (zoomViewer() === secondViewer) {
+      showScale(secondViewer);
+    }
+  });
+  for (const c of containers) {
+    c.addEventListener(
+      'wheel',
+      (e) => {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          const v = zoomLinked() || c === container ? viewer : secondViewer;
+          setScale(v, v.currentScale * Math.exp(-e.deltaY / 400));
+        }
+      },
+      { passive: false },
+    );
+  }
+  // Keep "fit" presets fitting when the editor is resized.
+  const refit = (v) => {
+    const value = v.currentScaleValue;
+    if (v.pdfDocument && (value === 'auto' || value === 'page-fit' || value === 'page-width')) {
+      v.currentScaleValue = value;
+    }
+  };
+  new ResizeObserver(() => refit(viewer)).observe(container);
+  // Linked, the second viewer gets the zoom factor of the main one instead.
+  new ResizeObserver(() => secondReady && !zoomLinked() && refit(secondViewer)).observe(secondContainer);
 
   // --- Back to the start ---
   $('resetView').addEventListener('click', () => {
     if (!viewerDoc) {
       return;
     }
+    // Both sides start at page 1 again, also with the scroll lock.
+    lockOffset = 0;
     viewer.currentScaleValue = 'auto';
     viewer.currentPageNumber = 1;
     container.scrollTop = 0;
     container.scrollLeft = 0;
+    if (secondReady && !zoomLinked()) {
+      secondViewer.currentScaleValue = 'auto';
+      secondContainer.scrollTop = 0;
+      secondContainer.scrollLeft = 0;
+    }
+    syncScroll(container);
+    refreshPairs();
   });
 
   // --- Rotation ---
@@ -140,6 +216,9 @@ async function main() {
       return;
     }
     viewer.pagesRotation = (viewer.pagesRotation + delta + 360) % 360;
+    if (secondReady) {
+      secondViewer.pagesRotation = viewer.pagesRotation;
+    }
     updateState({ rotation: viewer.pagesRotation });
     // Marks and differences are positions on the rotated page: compare again.
     void runDiff();
@@ -151,7 +230,7 @@ async function main() {
   let handTool = false;
   const applyTool = (tool) => {
     handTool = tool !== 'select';
-    container.classList.toggle('handTool', handTool);
+    containers.forEach((c) => c.classList.toggle('handTool', handTool));
     $('toolSelect').setAttribute('aria-pressed', String(!handTool));
     $('toolHand').setAttribute('aria-pressed', String(handTool));
     if (handTool) {
@@ -159,15 +238,20 @@ async function main() {
     }
   };
   applyTool(state.tool);
-  enableDragScroll(container, () => handTool);
+  containers.forEach((c) => enableDragScroll(c, () => handTool));
   $('toolSelect').addEventListener('click', () => (applyTool('select'), updateState({ tool: 'select' })));
   $('toolHand').addEventListener('click', () => (applyTool('hand'), updateState({ tool: 'hand' })));
 
   // --- Showing / hiding the two documents and the difference marks ---
   const show = { left: state.showLeft !== false, right: state.showRight !== false };
+  // Side by side, both documents are always shown.
+  let sideBySide = state.sideBySide === true;
   const applyVisibility = () => {
-    document.body.classList.toggle('hideMain', !show[mainSide]);
-    document.body.classList.toggle('hideOther', !show[otherSide()]);
+    document.body.classList.toggle('hideMain', !sideBySide && !show[mainSide]);
+    document.body.classList.toggle('hideOther', !sideBySide && !show[otherSide()]);
+    document.body.classList.toggle('sideBySide', sideBySide);
+    // Each document is on its own side: the main viewer is the left pane if it shows the first file.
+    document.body.classList.toggle('mainLeft', mainSide === 'left');
     document.body.style.setProperty('--main-tint', TINT[mainSide]);
     document.body.style.setProperty('--other-tint', TINT[otherSide()]);
     $('showLeft').setAttribute('aria-pressed', String(show.left));
@@ -185,15 +269,35 @@ async function main() {
   $('showLeft').addEventListener('click', () => toggleDocument('left'));
   $('showRight').addEventListener('click', () => toggleDocument('right'));
 
+  // Side by side, the button switches the differences on and off as a whole: the marks, the
+  // frame and the jumps between them. It has a setting of its own there and is off by default.
   const setShowMarks = (on) => {
     document.body.classList.toggle('hideMarks', !on);
+    document.body.classList.toggle('hideDiffs', sideBySide && !on);
     $('diffToggle').setAttribute('aria-pressed', String(on));
+    $('diffToggle').title = sideBySide ? 'Show differences' : 'Highlight differences';
   };
-  setShowMarks(state.showMarks !== false);
+  const marksShown = () => (sideBySide ? state.showMarksSideBySide === true : state.showMarks !== false);
+  const diffsOff = () => sideBySide && !marksShown();
+  setShowMarks(marksShown());
   $('diffToggle').addEventListener('click', () => {
     const on = $('diffToggle').getAttribute('aria-pressed') !== 'true';
+    updateState(sideBySide ? { showMarksSideBySide: on } : { showMarks: on });
     setShowMarks(on);
-    updateState({ showMarks: on });
+    updateDiffStatus();
+  });
+
+  // --- Visual or textual comparison ---
+  let textDiff = state.textDiff === true;
+  const applyTextDiff = () => {
+    $('textDiff').setAttribute('aria-pressed', String(textDiff));
+  };
+  applyTextDiff();
+  $('textDiff').addEventListener('click', () => {
+    textDiff = !textDiff;
+    updateState({ textDiff });
+    applyTextDiff();
+    void runDiff();
   });
 
   // --- Layer with the pages of the other document ---
@@ -206,7 +310,7 @@ async function main() {
     otherRenders.set(n, token);
     pageView.div.querySelector(':scope > .otherLayer')?.remove();
     const doc = docs[otherSide()];
-    if (!doc || n > doc.numPages) {
+    if (!doc || n > doc.numPages || sideBySide) {
       return;
     }
     try {
@@ -258,9 +362,22 @@ async function main() {
   };
 
   // --- Difference marks ---
+  // Page k of the main viewer is compared with page k + diffOffset of the other document. Side
+  // by side with the scroll lock, the offset is that of the lock, so that the pages shown next
+  // to each other are compared; otherwise it is 0. A pair can lack one of the pages.
+  let diffOffset = 0;
+  /** k of the first pair; negative if the other document has pages before the first page of the main one. */
+  let firstPair = 0;
+  const pairOffset = () => (sideBySide && scrollLock ? lockOffset : 0);
+  /** The page indexes of a pair in the main viewer and in the other document, or null where there is no such page. */
+  const pairOf = (p) => {
+    const k = p + firstPair;
+    const inRange = (i, doc) => (i >= 0 && i < doc.numPages ? i : null);
+    return { k, main: inRange(k, docs[mainSide]), other: inRange(k + diffOffset, docs[otherSide()]) };
+  };
   /**
-   * Per page: the differing areas (position and size as fractions of the page
-   * shown), or null while the page has not been compared yet.
+   * Per pair: the differing areas (position and size as fractions of the page in the main
+   * viewer, or of the other page if there is none), or null while it has not been compared yet.
    * @type {({ x: number, y: number, w: number, h: number }[] | null)[]}
    */
   let diffResults = [];
@@ -268,7 +385,10 @@ async function main() {
   let focus = null;
   const focusBox = document.createElement('div');
   focusBox.className = 'diffFocus';
-  /** @type {Map<number, HTMLCanvasElement>} page index -> marks */
+  // The same frame on the page of the second viewer, side by side.
+  const secondFocusBox = document.createElement('div');
+  secondFocusBox.className = 'diffFocus';
+  /** @type {Map<number, { canvas: HTMLCanvasElement, otherCanvas: HTMLCanvasElement, ratio: number[] }>} pair -> marks */
   const marks = new Map();
   let diffRun = 0;
   const scratch = document.createElement('canvas');
@@ -289,6 +409,7 @@ async function main() {
   // the pages differ. `size` / `otherSize` are the extent of the grid in
   // percent of the page shown and of the other document's page.
   const makeMarks = (cells, cols, rows, size, otherSize) => {
+    const otherCanvas = document.createElement('canvas');
     const canvas = document.createElement('canvas');
     canvas.className = 'diffMarks';
     canvas.width = cols;
@@ -309,8 +430,18 @@ async function main() {
     const maskCtx = mask.getContext('2d');
     maskCtx.imageSmoothingEnabled = false;
     maskCtx.drawImage(canvas, 0, 0, mask.width, mask.height);
+    // A copy for the other document's page in the second viewer.
+    otherCanvas.className = 'diffMarks';
+    otherCanvas.width = cols;
+    otherCanvas.height = rows;
+    otherCanvas.style.width = `${otherSize[0]}%`;
+    otherCanvas.style.height = `${otherSize[1]}%`;
+    otherCanvas.getContext('2d').drawImage(canvas, 0, 0);
     return {
       canvas,
+      otherCanvas,
+      // Converts positions on the page shown into positions on the other document's page.
+      ratio: [otherSize[0] / size[0], otherSize[1] / size[1]],
       mask: `url("${mask.toDataURL('image/png')}")`,
       maskSize: `${size[0]}% ${size[1]}%`,
       otherMaskSize: `${otherSize[0]}% ${otherSize[1]}%`,
@@ -319,7 +450,8 @@ async function main() {
 
   const attachMarks = (index) => {
     const entry = marks.get(index);
-    const div = viewer.getPageView(index)?.div;
+    const { main } = pairOf(index);
+    const div = main === null ? null : viewer.getPageView(main)?.div;
     if (entry && div) {
       if (entry.canvas.parentNode !== div) {
         div.append(entry.canvas);
@@ -331,6 +463,21 @@ async function main() {
     }
     if (focus?.page === index && div && focusBox.parentNode !== div) {
       div.append(focusBox);
+    }
+    attachSecondMarks(index);
+  };
+  const attachSecondMarks = (index) => {
+    const entry = marks.get(index);
+    const { other } = pairOf(index);
+    const div = secondDoc && other !== null ? secondViewer.getPageView(other)?.div : null;
+    if (!div) {
+      return;
+    }
+    if (entry && entry.otherCanvas.parentNode !== div) {
+      div.append(entry.otherCanvas);
+    }
+    if (focus?.page === index && secondFocusBox.parentNode !== div) {
+      div.append(secondFocusBox);
     }
   };
 
@@ -395,26 +542,10 @@ async function main() {
     return regions.sort((a, b) => a.y - b.y || a.x - b.x);
   };
 
-  /** Compares page n (1-based) of both documents; returns the differing areas and their marks. */
-  const diffPage = async (n) => {
-    const sides = ['left', 'right'];
-    if (sides.some((side) => n > docs[side].numPages)) {
-      // The page exists in only one document: mark it completely.
-      return {
-        marks: makeMarks([1], 1, 1, [100, 100], [100, 100]),
-        regions: [{ x: 0, y: 0, w: 1, h: 1 }],
-      };
-    }
-    const pages = [await docs.left.getPage(n), await docs.right.getPage(n)];
-    const sizes = pages.map((p) => p.getViewport({ scale: 1, rotation: rotationOf(p) }));
-    const scale = DIFF_WIDTH / Math.max(sizes[0].width, sizes[1].width);
-    const width = Math.ceil(Math.max(sizes[0].width, sizes[1].width) * scale);
-    const height = Math.ceil(Math.max(sizes[0].height, sizes[1].height) * scale);
+  /** The cells in which the two pages differ in their pixels, or null if they look the same. */
+  const pixelHits = async (pages, scale, width, height, cols, rows) => {
     const pixelsA = await renderPixels(pages[0], scale, width, height);
     const pixelsB = await renderPixels(pages[1], scale, width, height);
-
-    const cols = Math.ceil(width / CELL);
-    const rows = Math.ceil(height / CELL);
     const hits = new Uint8Array(cols * rows);
     let differs = false;
     for (let i = 0; i < pixelsA.length; i++) {
@@ -432,7 +563,131 @@ async function main() {
         differs = true;
       }
     }
-    if (!differs) {
+    return differs ? hits : null;
+  };
+
+  /** The words of a page with their boxes in px at the given scale. */
+  const pageWords = async (page, scale) => {
+    const viewport = page.getViewport({ scale, rotation: rotationOf(page) });
+    const content = await page.getTextContent();
+    const words = [];
+    for (const item of content.items) {
+      if (!item.str?.trim()) {
+        continue;
+      }
+      const [, , c, d, x, y] = item.transform;
+      const height = item.height || Math.hypot(c, d);
+      // The box of the item, from a bit below the baseline (descenders) to the top of the font.
+      const [x0, y0] = viewport.convertToViewportPoint(x, y - height * 0.25);
+      const [x1, y1] = viewport.convertToViewportPoint(x + item.width, y + height);
+      const [left, right, top, bottom] = [Math.min(x0, x1), Math.max(x0, x1), Math.min(y0, y1), Math.max(y0, y1)];
+      // Words get a share of the box by their number of characters.
+      const horizontal = right - left >= bottom - top;
+      for (const m of item.str.matchAll(/\S+/g)) {
+        const from = m.index / item.str.length;
+        const to = (m.index + m[0].length) / item.str.length;
+        words.push({
+          text: m[0],
+          box: horizontal
+            ? [left + from * (right - left), top, left + to * (right - left), bottom]
+            : [left, top + from * (bottom - top), right, top + to * (bottom - top)],
+        });
+      }
+    }
+    return words;
+  };
+
+  /** Marks the words of a and b that are not in their longest common subsequence. */
+  const changedWords = (a, b) => {
+    const changedA = new Uint8Array(a.length);
+    const changedB = new Uint8Array(b.length);
+    let start = 0;
+    while (start < a.length && start < b.length && a[start].text === b[start].text) {
+      start++;
+    }
+    let endA = a.length;
+    let endB = b.length;
+    while (endA > start && endB > start && a[endA - 1].text === b[endB - 1].text) {
+      endA--;
+      endB--;
+    }
+    const n = endA - start;
+    const m = endB - start;
+    if (n * m > MAX_TEXT_DIFF) {
+      changedA.fill(1, start, endA);
+      changedB.fill(1, start, endB);
+      return [changedA, changedB];
+    }
+    // lengths[i * (m + 1) + j]: length of the common subsequence of a[start + i ..] and b[start + j ..]
+    const lengths = new Uint32Array((n + 1) * (m + 1));
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        lengths[i * (m + 1) + j] =
+          a[start + i].text === b[start + j].text
+            ? lengths[(i + 1) * (m + 1) + j + 1] + 1
+            : Math.max(lengths[(i + 1) * (m + 1) + j], lengths[i * (m + 1) + j + 1]);
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < n || j < m) {
+      if (i < n && j < m && a[start + i].text === b[start + j].text) {
+        i++;
+        j++;
+      } else if (j >= m || (i < n && lengths[(i + 1) * (m + 1) + j] >= lengths[i * (m + 1) + j + 1])) {
+        changedA[start + i++] = 1;
+      } else {
+        changedB[start + j++] = 1;
+      }
+    }
+    return [changedA, changedB];
+  };
+
+  /**
+   * The cells covered by words that were added, removed or changed, or null if the text is
+   * the same. The words of both pages are marked; the pages are aligned at the top left.
+   */
+  const textHits = async (pages, scale, cols, rows) => {
+    const [a, b] = await Promise.all(pages.map((p) => pageWords(p, scale)));
+    const changed = changedWords(a, b);
+    const hits = new Uint8Array(cols * rows);
+    let differs = false;
+    [a, b].forEach((words, side) =>
+      words.forEach(({ box }, i) => {
+        if (!changed[side][i]) {
+          return;
+        }
+        differs = true;
+        const clamp = (v, max) => Math.max(0, Math.min(max - 1, Math.floor(v / CELL)));
+        for (let y = clamp(box[1], rows); y <= clamp(box[3], rows); y++) {
+          hits.fill(1, y * cols + clamp(box[0], cols), y * cols + clamp(box[2], cols) + 1);
+        }
+      }),
+    );
+    return differs ? hits : null;
+  };
+
+  /** Compares the pages of a pair; returns the differing areas and their marks. */
+  const diffPair = async (index) => {
+    const { main, other } = pairOf(index);
+    if (main === null || other === null) {
+      // The page exists in only one document: mark it completely.
+      return {
+        marks: makeMarks([1], 1, 1, [100, 100], [100, 100]),
+        regions: [{ x: 0, y: 0, w: 1, h: 1 }],
+      };
+    }
+    const pages = [await docs[mainSide].getPage(main + 1), await docs[otherSide()].getPage(other + 1)];
+    const sizes = pages.map((p) => p.getViewport({ scale: 1, rotation: rotationOf(p) }));
+    const scale = DIFF_WIDTH / Math.max(sizes[0].width, sizes[1].width);
+    const width = Math.ceil(Math.max(sizes[0].width, sizes[1].width) * scale);
+    const height = Math.ceil(Math.max(sizes[0].height, sizes[1].height) * scale);
+    const cols = Math.ceil(width / CELL);
+    const rows = Math.ceil(height / CELL);
+    const hits = textDiff
+      ? await textHits(pages, scale, cols, rows)
+      : await pixelHits(pages, scale, width, height, cols, rows);
+    if (!hits) {
       return { regions: [] };
     }
     const cells = grow(hits, cols, rows, MARK_PADDING);
@@ -442,10 +697,9 @@ async function main() {
       ((cols * CELL) / (size.width * scale)) * 100,
       ((rows * CELL) / (size.height * scale)) * 100,
     ];
-    const shown = sizes[sides.indexOf(mainSide)];
-    const other = sizes[sides.indexOf(otherSide())];
+    const [shown, otherSize] = sizes;
     return {
-      marks: makeMarks(cells, cols, rows, percent(shown), percent(other)),
+      marks: makeMarks(cells, cols, rows, percent(shown), percent(otherSize)),
       regions: findRegions(
         cells,
         groups,
@@ -464,11 +718,15 @@ async function main() {
   // The extension lists the differences in the Problems view of VS Code.
   let reported = '[]';
   const reportDifferences = (diffs) => {
-    const items = diffs.map(({ page }) => ({
-      page: page + 1,
-      only:
-        page >= docs.left.numPages ? 'right' : page >= docs.right.numPages ? 'left' : undefined,
-    }));
+    const items = diffs.map(({ page }) => {
+      const { main, other } = pairOf(page);
+      const [left, right] = mainSide === 'left' ? [main, other] : [other, main];
+      return {
+        page: (left ?? right) + 1,
+        otherPage: left !== null && right !== null && left !== right ? right + 1 : undefined,
+        only: left === null ? 'right' : right === null ? 'left' : undefined,
+      };
+    });
     const serialized = JSON.stringify(items);
     if (serialized !== reported) {
       reported = serialized;
@@ -488,7 +746,7 @@ async function main() {
       text = `Vergleiche … ${done} / ${diffResults.length}`;
     } else if (!diffs.length) {
       text = 'No differences';
-    } else if (focused >= 0) {
+    } else if (focused >= 0 && !diffsOff()) {
       text = `Difference ${focused + 1} of ${diffs.length}`;
     } else {
       text =
@@ -500,6 +758,11 @@ async function main() {
     for (const id of ['diffToggle', 'diffPrev', 'diffNext', 'showLeft', 'showRight']) {
       $(id).disabled = !diffs.length;
     }
+    // Side by side, both documents are always shown.
+    $('showLeft').disabled ||= sideBySide;
+    $('showRight').disabled ||= sideBySide;
+    $('diffPrev').disabled ||= diffsOff();
+    $('diffNext').disabled ||= diffsOff();
     if (diffResults.length && done === diffResults.length && !diffs.length && (!show.left || !show.right)) {
       // A hidden document could not be shown again with the buttons disabled.
       show.left = show.right = true;
@@ -515,6 +778,10 @@ async function main() {
     window.addEventListener(type, () => (jumpToFirst = false), { capture: true, passive: true });
   }
   const tryJumpToFirst = () => {
+    if (diffsOff()) {
+      jumpToFirst = false;
+      return;
+    }
     // The first difference is known once all pages before it have been compared.
     const page = diffResults.findIndex((regions) => regions === null || regions.length);
     if (page < 0) {
@@ -534,18 +801,22 @@ async function main() {
     return diffFinished;
   };
   const compareAllPages = async (run) => {
-    marks.forEach((entry) => entry.canvas.remove());
+    marks.forEach((entry) => (entry.canvas.remove(), entry.otherCanvas.remove()));
     marks.clear();
     for (let i = 0; i < viewer.pagesCount; i++) {
       viewer.getPageView(i)?.div.classList.remove('diffPage');
     }
     focus = null;
     focusBox.remove();
-    diffResults = new Array(Math.max(docs.left.numPages, docs.right.numPages)).fill(null);
+    secondFocusBox.remove();
+    diffOffset = pairOffset();
+    firstPair = Math.min(0, -diffOffset);
+    const pairs = Math.max(docs[mainSide].numPages, docs[otherSide()].numPages - diffOffset) - firstPair;
+    diffResults = new Array(pairs).fill(null);
     updateDiffStatus();
     for (let remaining = diffResults.length; remaining > 0; remaining--) {
       // Compare the pages closest to what the user is looking at first.
-      const around = viewer.currentPageNumber - 1;
+      const around = viewer.currentPageNumber - 1 - firstPair;
       let index = -1;
       for (let i = 0; i < diffResults.length; i++) {
         if (diffResults[i] === null && (index < 0 || Math.abs(i - around) < Math.abs(index - around))) {
@@ -554,10 +825,10 @@ async function main() {
       }
       let result;
       try {
-        result = await diffPage(index + 1);
+        result = await diffPair(index);
       } catch (err) {
         if (run === diffRun) {
-          console.error(`Page ${index + 1} could not be compared`, err);
+          console.error(`Page ${index + firstPair + 1} could not be compared`, err);
         }
         result = { regions: [] };
       }
@@ -583,51 +854,93 @@ async function main() {
     if (!e.isDetailView) {
       void renderOtherLayer(e.source);
     }
-    attachMarks(e.pageNumber - 1);
+    attachMarks(e.pageNumber - 1 - firstPair);
   });
 
-  const diffTop = ({ page, region }) => {
-    const div = viewer.getPageView(page).div;
-    return div.offsetTop + div.clientTop + region.y * div.clientHeight;
+  /** The pane the jumps between differences start from. */
+  const activePane = () => (sideBySide && secondDoc ? activeContainer : container);
+  // Top of a difference in one of the panes. A page that the second viewer does not have
+  // counts as being after its end.
+  const diffTop = ({ page, region }, c = container) => {
+    const { k, main, other } = pairOf(page);
+    const index = c === container ? main : other;
+    const div = index === null ? null : (c === container ? viewer : secondViewer).getPageView(index)?.div;
+    if (!div) {
+      // Before the first page or after the last one.
+      return (c === container ? k : k + diffOffset) < 0 ? 0 : c.scrollHeight;
+    }
+    const ry = c === container ? 1 : (marks.get(page)?.ratio[1] ?? 1);
+    return div.offsetTop + div.clientTop + region.y * ry * div.clientHeight;
   };
-  // Frames a difference and scrolls to it if necessary.
-  const focusDiff = (target) => {
-    const { region } = target;
-    const div = viewer.getPageView(target.page).div;
-    Object.assign(focusBox.style, {
+  // Scrolls an area of a page (fractions of the page) into view if it is not completely visible.
+  const reveal = (c, div, region) => {
+    const top = div.offsetTop + div.clientTop + region.y * div.clientHeight;
+    const bottom = top + region.h * div.clientHeight;
+    if (top < c.scrollTop || bottom > c.scrollTop + c.clientHeight) {
+      c.scrollTop = Math.max(0, top - FOCUS_MARGIN);
+    }
+    const left = div.offsetLeft + div.clientLeft + region.x * div.clientWidth;
+    const right = left + region.w * div.clientWidth;
+    if (left < c.scrollLeft || right > c.scrollLeft + c.clientWidth) {
+      c.scrollLeft = Math.max(0, left - FOCUS_MARGIN);
+    }
+  };
+  const frame = (box, region) =>
+    Object.assign(box.style, {
       left: `${region.x * 100}%`,
       top: `${region.y * 100}%`,
       width: `${region.w * 100}%`,
       height: `${region.h * 100}%`,
     });
-    div.append(focusBox);
-    // Only scroll if the difference is not completely visible already.
-    const top = diffTop(target);
-    const bottom = top + region.h * div.clientHeight;
-    if (top < container.scrollTop || bottom > container.scrollTop + container.clientHeight) {
-      container.scrollTop = Math.max(0, top - FOCUS_MARGIN);
+  // Frames a difference and scrolls to it if necessary.
+  const focusDiff = (target) => {
+    const { region } = target;
+    const { main, other } = pairOf(target.page);
+    const div = main === null ? null : viewer.getPageView(main)?.div;
+    const secondDiv = secondDoc && other !== null ? secondViewer.getPageView(other)?.div : null;
+    if (!div && !secondDiv) {
+      return;
     }
-    const left = div.offsetLeft + div.clientLeft + region.x * div.clientWidth;
-    const right = left + region.w * div.clientWidth;
-    if (left < container.scrollLeft || right > container.scrollLeft + container.clientWidth) {
-      container.scrollLeft = Math.max(0, left - FOCUS_MARGIN);
-    }
+    frame(focusBox, region);
+    focusBox.remove();
+    div?.append(focusBox);
+    // On the other document's page the same area can be at another position if the page sizes differ.
+    const [rx, ry] = marks.get(target.page)?.ratio ?? [1, 1];
+    const secondRegion = { x: region.x * rx, y: region.y * ry, w: region.w * rx, h: region.h * ry };
+    frame(secondFocusBox, secondRegion);
+    secondFocusBox.remove();
     focus = { ...target, scrollTop: container.scrollTop };
+    attachSecondMarks(target.page);
+    // The difference is shown in the active pane; with the scroll lock the other one follows,
+    // without it both scroll to it.
+    const pane = (activePane() === secondContainer || !div) && secondDiv ? secondContainer : container;
+    if (div && (pane === container || !scrollLock)) {
+      reveal(container, div, region);
+    }
+    if (secondDiv && (pane === secondContainer || !scrollLock)) {
+      reveal(secondContainer, secondDiv, secondRegion);
+    }
+    focus = { ...target, pane, scrollTop: pane.scrollTop };
     updateDiffStatus();
   };
   const goToDiff = (direction) => {
+    if (diffsOff()) {
+      return;
+    }
     const diffs = allDiffs();
     const current = focus ? diffs.findIndex((d) => d.region === focus.region) : -1;
+    const c = activePane();
     let index;
-    if (current >= 0 && Math.abs(container.scrollTop - focus.scrollTop) <= 2) {
+    if (current >= 0 && focus.pane === c && Math.abs(c.scrollTop - focus.scrollTop) <= 2) {
       index = current + direction;
     } else {
-      // No difference selected, or the user has scrolled since: continue from what is visible.
-      const top = container.scrollTop;
+      // No difference selected, or the user has scrolled since: continue from what is visible
+      // in the active pane.
+      const top = c.scrollTop;
       index =
         direction > 0
-          ? diffs.findIndex((d, i) => i !== current && diffTop(d) >= top)
-          : diffs.findLastIndex((d, i) => i !== current && diffTop(d) < top + FOCUS_MARGIN - 1);
+          ? diffs.findIndex((d, i) => i !== current && diffTop(d, c) >= top)
+          : diffs.findLastIndex((d, i) => i !== current && diffTop(d, c) < top + FOCUS_MARGIN - 1);
     }
     if (diffs[index]) {
       focusDiff(diffs[index]);
@@ -636,14 +949,177 @@ async function main() {
   $('diffPrev').addEventListener('click', () => goToDiff(-1));
   $('diffNext').addEventListener('click', () => goToDiff(1));
 
+  // --- Side by side and scroll lock ---
+  // Scroll positions in pages: the index of the page at the top plus how far (0..1) it is
+  // scrolled out of view. Unlike pixels, they do not depend on the zoom or the page heights.
+  const pagePosition = (v, c, top = c.scrollTop) => {
+    for (let i = 0; i < v.pagesCount; i++) {
+      const div = v.getPageView(i)?.div;
+      if (div && div.offsetTop + div.offsetHeight > top) {
+        return i + Math.max(0, (top - div.offsetTop) / div.offsetHeight);
+      }
+    }
+    return v.pagesCount;
+  };
+  const scrollTopAt = (v, position) => {
+    const index = Math.max(0, Math.min(Math.floor(position), v.pagesCount - 1));
+    const div = v.getPageView(index)?.div;
+    if (!div) {
+      return 0;
+    }
+    return div.offsetTop + Math.max(0, Math.min(1, position - index)) * div.offsetHeight;
+  };
+  let scrollLock = state.scrollLock !== false;
+  // How many pages the second viewer is ahead of the main one. The lock keeps the pages that
+  // were shown when it was switched on side by side, e.g. page 3 next to page 5, and shows the
+  // same part of both pages.
+  let lockOffset = 0;
+  const measureLockOffset = () => {
+    // The page in the middle of each pane is the one that is shown.
+    const shownPage = (v, c) => Math.min(Math.floor(pagePosition(v, c, c.scrollTop + c.clientHeight / 2)), v.pagesCount - 1);
+    lockOffset = shownPage(secondViewer, secondContainer) - shownPage(viewer, container);
+  };
+  /** Positions set by the lock; their scroll events are not passed on again. */
+  const syncedTo = new Map();
+  /** Sets a position that the lock is not to pass on. */
+  const scrollUnsynced = (c, top, left) => {
+    c.scrollTop = top;
+    c.scrollLeft = left;
+    syncedTo.set(c, { top: c.scrollTop, left: c.scrollLeft });
+  };
+  // Number of viewers being reloaded. Meanwhile the lock does nothing, as a viewer jumps to the
+  // top when it gets the new document; afterwards both get back their own positions.
+  let reloading = 0;
+  // Scrolls the other pane by as many pages as this one, and to the same horizontal position.
+  // Pages of different heights therefore stay side by side.
+  const syncScroll = (from) => {
+    if (!sideBySide || !scrollLock || !secondReady || !viewerDoc || reloading) {
+      return;
+    }
+    const [fromViewer, to, toViewer, offset] =
+      from === container
+        ? [viewer, secondContainer, secondViewer, lockOffset]
+        : [secondViewer, container, viewer, -lockOffset];
+    to.scrollTop = scrollTopAt(toViewer, pagePosition(fromViewer, from) + offset);
+    to.scrollLeft = from.scrollLeft;
+    syncedTo.set(to, { top: to.scrollTop, left: to.scrollLeft });
+  };
+  for (const c of containers) {
+    c.addEventListener('scroll', () => {
+      const synced = syncedTo.get(c);
+      syncedTo.delete(c);
+      if (!synced || synced.top !== c.scrollTop || synced.left !== c.scrollLeft) {
+        syncScroll(c);
+      }
+    });
+  }
+
+  /** Puts the other document into the second viewer, or none while the view is not side by side. */
+  const updateSecondViewer = () => {
+    const doc = sideBySide && viewerDoc ? docs[otherSide()] : null;
+    if (doc === secondDoc) {
+      return;
+    }
+    const keep = secondReady
+      ? { top: secondContainer.scrollTop, left: secondContainer.scrollLeft, scale: secondViewer.currentScaleValue }
+      : null;
+    secondDoc = doc;
+    secondReady = false;
+    if (!keep) {
+      lockOffset = 0; // newly side by side: page 1 next to page 1
+    }
+    if (doc) {
+      if (keep) {
+        reloading++;
+      }
+      secondBus.on(
+        'pagesinit',
+        () => {
+          if (secondDoc !== doc) {
+            reloading -= keep ? 1 : 0;
+            return; // replaced in the meantime
+          }
+          secondReady = true;
+          secondViewer.pagesRotation = viewer.pagesRotation;
+          // Its own zoom is kept over a reload; when it is linked or new, it takes that of the main viewer.
+          if (keep && !zoomLinked()) {
+            secondViewer.currentScaleValue = keep.scale;
+          } else {
+            secondViewer.currentScale = viewer.currentScale;
+          }
+          // Once the pages are laid out: where it was before a reload, or, when it is new, in line
+          // with the main viewer.
+          secondBus.on(
+            'pagerendered',
+            () =>
+              requestAnimationFrame(() => {
+                if (keep) {
+                  scrollUnsynced(secondContainer, keep.top, keep.left);
+                  reloading--;
+                } else {
+                  syncScroll(container);
+                }
+              }),
+            { once: true },
+          );
+        },
+        { once: true },
+      );
+    }
+    secondViewer.setDocument(doc);
+    secondLinks.setDocument(doc);
+  };
+  secondBus.on('pagerendered', (e) => attachSecondMarks(e.pageNumber - 1 - diffOffset - firstPair));
+  /** Compares again if other pages are now next to each other. */
+  const refreshPairs = () => {
+    if (pairOffset() !== diffOffset) {
+      void runDiff();
+    }
+  };
+
+  const applySideBySide = () => {
+    $('sideBySide').setAttribute('aria-pressed', String(sideBySide));
+    $('scrollLock').disabled = !sideBySide;
+    $('scrollLock').setAttribute('aria-pressed', String(scrollLock));
+    setShowMarks(marksShown());
+    applyVisibility();
+    updateSecondViewer();
+    updateDiffStatus();
+  };
+  $('sideBySide').addEventListener('click', () => {
+    sideBySide = !sideBySide;
+    updateState({ sideBySide });
+    applySideBySide();
+    if (!sideBySide) {
+      renderAllOtherLayers();
+    }
+    refreshPairs();
+  });
+  $('scrollLock').addEventListener('click', () => {
+    scrollLock = !scrollLock;
+    updateState({ scrollLock });
+    applySideBySide();
+    // The pages shown stay; the other pane takes the zoom and the part of the page of the one the user is looking at.
+    if (scrollLock && secondReady) {
+      measureLockOffset();
+      if (activePane() === secondContainer) {
+        viewer.currentScale = secondViewer.currentScale;
+      } else {
+        secondViewer.currentScale = viewer.currentScale;
+      }
+    }
+    showScale(zoomViewer());
+    syncScroll(activePane());
+    refreshPairs();
+  });
+
   // --- Loading ---
   // The scroll position to come back to after a reload. It is kept until the new pages are
   // rendered, because both documents often reload one after the other.
   let savedScroll = null;
   const restoreScroll = () => {
     if (savedScroll) {
-      container.scrollTop = savedScroll.top;
-      container.scrollLeft = savedScroll.left;
+      scrollUnsynced(container, savedScroll.top, savedScroll.left);
     }
   };
   // Called whenever a document was (re)loaded; nothing is shown before both are there.
@@ -661,6 +1137,9 @@ async function main() {
       }
       viewerDoc = mainDoc;
       otherRenders.clear();
+      if (!first) {
+        reloading++;
+      }
       eventBus.on(
         'pagesinit',
         () => {
@@ -677,6 +1156,7 @@ async function main() {
                 requestAnimationFrame(() => {
                   restoreScroll();
                   savedScroll = null;
+                  reloading--;
                 }),
               { once: true },
             );
@@ -691,6 +1171,7 @@ async function main() {
     } else {
       renderAllOtherLayers();
     }
+    updateSecondViewer();
     void runDiff();
   };
 
@@ -726,13 +1207,13 @@ async function main() {
     const mod = e.ctrlKey || e.metaKey;
     if (mod && (e.key === '+' || e.key === '=')) {
       e.preventDefault();
-      viewer.increaseScale();
+      zoomViewer().increaseScale();
     } else if (mod && e.key === '-') {
       e.preventDefault();
-      viewer.decreaseScale();
+      zoomViewer().decreaseScale();
     } else if (mod && e.key === '0') {
       e.preventDefault();
-      viewer.currentScaleValue = 'page-width';
+      zoomViewer().currentScaleValue = 'page-width';
     }
   });
 
@@ -748,7 +1229,7 @@ async function main() {
     }
   });
 
-  applyVisibility();
+  applySideBySide();
   vscode.postMessage({ type: 'ready' });
 }
 

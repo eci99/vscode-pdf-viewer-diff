@@ -219,6 +219,7 @@ async function main() {
       showMessage(`The file could not be read: ${msg.message}`);
     }
   });
+  $('compareWith').addEventListener('click', () => vscode.postMessage({ type: 'compare' }));
   $('comparePrevious').addEventListener('click', () => vscode.postMessage({ type: 'comparePrevious' }));
 
   vscode.postMessage({ type: 'ready' });

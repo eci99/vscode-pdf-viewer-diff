@@ -29,6 +29,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('pdfViewer.previousDifference', () =>
       compareProvider.goToDifference(-1),
     ),
+    ...registerDropZone(),
   );
 }
 
@@ -192,6 +193,8 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
         } else if (msg.type === 'loaded') {
           document.confirmCurrent();
           void webview.postMessage({ type: 'previous', available: !!document.previous });
+        } else if (msg.type === 'compare') {
+          void comparePdfs(document.uri);
         } else if (msg.type === 'comparePrevious' && document.previous) {
           const name = baseName(document.uri);
           void openCompare(
@@ -258,6 +261,87 @@ async function comparePdfs(uri?: vscode.Uri, selected?: vscode.Uri[]): Promise<v
     return;
   }
   await openCompare(fileSource(left), fileSource(right));
+}
+
+// "PDF Compare" in the Explorer: a PDF dropped on it is compared with the PDF shown. Webviews
+// cannot take drops from the Explorer (VS Code opens the file instead), a tree view can.
+const DROP_ZONE_VIEW = 'pdfViewer.dropZone';
+const URI_LIST = 'text/uri-list';
+
+class DropZone implements vscode.TreeDataProvider<string>, vscode.TreeDragAndDropController<string> {
+  readonly dropMimeTypes = [URI_LIST];
+  readonly dragMimeTypes = [];
+  private readonly changed = new vscode.EventEmitter<void>();
+  readonly onDidChangeTreeData = this.changed.event;
+  /** The PDF last shown in the active editor; dropped files are compared with it. */
+  shown?: vscode.Uri;
+
+  /** Follows the active editor; forgets the PDF once it is closed. */
+  update(open: vscode.Uri[]): void {
+    let shown = activePdfUri() ?? this.shown;
+    if (shown && !open.some((uri) => uri.toString() === shown!.toString())) {
+      shown = undefined;
+    }
+    if (shown?.toString() !== this.shown?.toString()) {
+      this.shown = shown;
+      this.changed.fire();
+    }
+  }
+
+  getChildren(element?: string): string[] {
+    return element ? [] : ['drop'];
+  }
+
+  getTreeItem(): vscode.TreeItem {
+    const item = new vscode.TreeItem('Drop a PDF here');
+    item.iconPath = new vscode.ThemeIcon('diff');
+    item.description = this.shown ? `to compare it with ${baseName(this.shown)}` : 'to compare it';
+    item.tooltip = this.shown
+      ? `Drop a PDF from the Explorer here to compare it with ${baseName(this.shown)}. Two dropped PDFs are compared with each other. Click to pick a file instead.`
+      : 'Drop two PDFs from the Explorer here to compare them, or one to pick the second. Click to pick the files instead.';
+    item.command = { command: 'pdfViewer.compare', title: 'Compare PDF with…', arguments: [this.shown] };
+    return item;
+  }
+
+  async handleDrop(_target: string | undefined, data: vscode.DataTransfer): Promise<void> {
+    const list = (await data.get(URI_LIST)?.asString()) ?? '';
+    const pdfs = list
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'))
+      .map((line) => vscode.Uri.parse(line))
+      .filter(isPdf);
+    if (pdfs.length >= 2) {
+      await openCompare(fileSource(pdfs[0]), fileSource(pdfs[1]));
+    } else if (pdfs.length === 1 && this.shown && this.shown.toString() !== pdfs[0].toString()) {
+      await openCompare(fileSource(this.shown), fileSource(pdfs[0]));
+    } else if (pdfs.length === 1) {
+      await comparePdfs(pdfs[0]);
+    } else {
+      void vscode.window.showInformationMessage('Only PDF files can be compared.');
+    }
+  }
+}
+
+function registerDropZone(): vscode.Disposable[] {
+  const dropZone = new DropZone();
+  // The view is shown while a PDF or a comparison is open.
+  const update = (): void => {
+    const inputs = vscode.window.tabGroups.all.flatMap((group) => group.tabs.map((tab) => tab.input));
+    const custom = inputs.filter((input) => input instanceof vscode.TabInputCustom);
+    dropZone.update(custom.filter((input) => input.viewType === PdfEditorProvider.viewType).map((input) => input.uri));
+    const open = custom.some(
+      (input) =>
+        input.viewType === PdfEditorProvider.viewType || input.viewType === CompareEditorProvider.viewType,
+    );
+    void vscode.commands.executeCommand('setContext', 'pdfViewer.pdfOpen', open);
+  };
+  update();
+  return [
+    vscode.window.createTreeView(DROP_ZONE_VIEW, { treeDataProvider: dropZone, dragAndDropController: dropZone }),
+    vscode.window.tabGroups.onDidChangeTabs(update),
+    vscode.window.tabGroups.onDidChangeTabGroups(update),
+  ];
 }
 
 const GIT_SCHEME = 'git';
@@ -386,7 +470,10 @@ class CompareDocument implements vscode.CustomDocument {
 }
 
 interface DifferenceInfo {
+  /** Page in the first document, or in the second if the first does not have it. */
   page: number;
+  /** Page in the second document if it is not the same; side by side, pages can be compared with an offset. */
+  otherPage?: number;
   /** Set if the page exists in only one of the documents. */
   only?: 'left' | 'right';
 }
@@ -491,7 +578,9 @@ class CompareEditorProvider implements vscode.CustomReadonlyEditorProvider<Compa
       const position = new vscode.Position(item.page - 1, indexOnPage);
       const message = item.only
         ? `Page ${item.page} exists only in “${comparison[item.only].name}”`
-        : `Difference on page ${item.page}`;
+        : item.otherPage
+          ? `Difference on page ${item.page} of “${comparison.left.name}” and page ${item.otherPage} of “${comparison.right.name}”`
+          : `Difference on page ${item.page}`;
       const diagnostic = new vscode.Diagnostic(
         new vscode.Range(position, position),
         message,
@@ -691,6 +780,9 @@ const VIEWER_BODY = /* html */ `
     <div class="group">${ZOOM_CONTROLS}
     <span class="separator"></span>${TOOL_CONTROLS}</div>
     <div class="group">
+    <button id="compareWith" title="Compare with…">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/><path d="M10 9h4"/><path d="M10 15h4"/></svg>
+    </button>
     <button id="comparePrevious" title="Compare with the version before the last reload (no earlier version yet)" disabled>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
     </button></div>${FIND_TOGGLE}${FIND_ROW}
@@ -708,6 +800,16 @@ const compareBody = (leftToggle: string, rightToggle: string): string => /* html
     <span class="spacer"></span>
     <div class="group">${leftToggle}${rightToggle}
     <span class="separator"></span>
+    <button id="sideBySide" title="Side by side" aria-pressed="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18"/></svg>
+    </button>
+    <button id="scrollLock" title="Scroll both sides together" aria-pressed="true" disabled>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+    </button>
+    <span class="separator"></span>
+    <button id="textDiff" title="Compare the text instead of the appearance" aria-pressed="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+    </button>
     <button id="diffToggle" title="Highlight differences" aria-pressed="true">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 11-6 6v3h9l3-3" stroke="#f5c400" fill="#f5c400"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
     </button>
@@ -717,4 +819,7 @@ const compareBody = (leftToggle: string, rightToggle: string): string => /* html
   </div>
   <div id="viewerContainer" tabindex="0">
     <div id="viewer" class="pdfViewer"></div>
+  </div>
+  <div id="secondContainer" tabindex="0">
+    <div id="secondViewer" class="pdfViewer"></div>
   </div>`;

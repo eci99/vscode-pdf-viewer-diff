@@ -162,12 +162,38 @@ body {
 }
 
 /* pdf.js requires an absolutely positioned scroll container */
-#viewerContainer {
+#viewerContainer,
+#secondContainer {
   position: absolute;
   inset: var(--toolbar-height, 32px) 0 0 0;
   overflow: auto;
   background: var(--vscode-editor-background);
   outline: none;
+}
+
+/* Compare view side by side: the first file on the left, the second on the right. The main
+   viewer shows the file with more pages, so it is the left or the right pane. */
+#secondContainer {
+  display: none;
+}
+
+.sideBySide #secondContainer {
+  display: block;
+}
+
+.sideBySide.mainLeft #viewerContainer,
+.sideBySide:not(.mainLeft) #secondContainer {
+  right: 50%;
+}
+
+.sideBySide.mainLeft #secondContainer,
+.sideBySide:not(.mainLeft) #viewerContainer {
+  left: 50%;
+  border-left: 1px solid var(--vscode-editorGroup-border, var(--vscode-editorWidget-border, transparent));
+}
+
+.sideBySide .otherLayer {
+  display: none;
 }
 
 /* Hand tool: drag to scroll instead of selecting text */
@@ -240,7 +266,7 @@ body {
   mask: var(--diff-mask) 0 0 / var(--diff-mask-size) no-repeat;
 }
 
-.compare:not(.hideMain, .hideOther) .pdfViewer .page.diffPage::before {
+.compare:not(.hideMain, .hideOther, .sideBySide) .pdfViewer .page.diffPage::before {
   display: block;
 }
 
@@ -289,7 +315,8 @@ body {
   pointer-events: none;
 }
 
-.hideMarks .diffMarks {
+.hideMarks .diffMarks,
+.hideDiffs .diffFocus {
   display: none;
 }
 
