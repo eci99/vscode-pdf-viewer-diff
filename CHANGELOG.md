@@ -2,6 +2,10 @@
 
 All notable changes to this extension are documented in this file.
 
+## 0.1.5 – 2026-10-21
+
+- `Ctrl`+mouse wheel zooms around the mouse pointer: the part of the page under the pointer stays where it is, in the viewer and in the comparison.
+
 ## 0.1.4 – 2026-10-21
 
 - Compare button in the toolbar of the viewer: compares the PDF shown with another file.

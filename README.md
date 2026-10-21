@@ -13,7 +13,7 @@ Displays PDF files directly in the editor and compares two PDFs visually. Render
 ## Features
 
 - Opens `*.pdf` files automatically in a custom editor
-- Page navigation and zoom: toolbar buttons, `Ctrl`+mouse wheel, `Ctrl`+`+` / `-` / `0`, fit to page width or whole page
+- Page navigation and zoom: toolbar buttons, `Ctrl`+mouse wheel (zooms around the mouse pointer), `Ctrl`+`+` / `-` / `0`, fit to page width or whole page
 - Rotate left / right
 - Drag the page with the mouse (hand tool, the default), or switch to text selection
 - Back to the start with one button: page 1, automatic zoom, scrolled to the top left

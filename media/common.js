@@ -1,8 +1,23 @@
 // @ts-check
 // Shared between the single viewer (viewer.js) and the compare view (compare.js).
 
-export const MIN_SCALE = 0.1;
-export const MAX_SCALE = 10;
+const MIN_SCALE = 0.1;
+const MAX_SCALE = 10;
+
+/**
+ * Zooms a viewer for a Ctrl+wheel event, keeping the point under the mouse where it is.
+ * @param {any} viewer the PDFViewer to zoom
+ * @param {WheelEvent} e the event, on the container of the viewer or a pane of the same size
+ */
+export function zoomAt(viewer, e) {
+  const previous = viewer.currentScale;
+  viewer.currentScaleValue = String(Math.min(MAX_SCALE, Math.max(MIN_SCALE, previous * Math.exp(-e.deltaY / 400))));
+  // pdf.js keeps the top left corner in place; move the content so that the mouse position stays.
+  const factor = viewer.currentScale / previous - 1;
+  const rect = /** @type {HTMLElement} */ (e.currentTarget).getBoundingClientRect();
+  viewer.container.scrollLeft += (e.clientX - rect.left) * factor;
+  viewer.container.scrollTop += (e.clientY - rect.top) * factor;
+}
 
 /**
  * Loads pdf.js and its viewer components and starts the worker.

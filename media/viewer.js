@@ -1,5 +1,5 @@
 // @ts-check
-import { MAX_SCALE, MIN_SCALE, enableDragScroll, initPdfjs, setupFind, trackToolbarHeight } from './common.js';
+import { enableDragScroll, initPdfjs, setupFind, trackToolbarHeight, zoomAt } from './common.js';
 
 const vscode = acquireVsCodeApi();
 const config = JSON.parse(document.getElementById('config').textContent);
@@ -104,9 +104,6 @@ async function main() {
   });
 
   // --- Zoom ---
-  const setScale = (scale) => {
-    viewer.currentScaleValue = String(Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale)));
-  };
   $('zoomIn').addEventListener('click', () => viewer.increaseScale());
   $('zoomOut').addEventListener('click', () => viewer.decreaseScale());
 
@@ -153,7 +150,7 @@ async function main() {
         return;
       }
       e.preventDefault();
-      setScale(viewer.currentScale * Math.exp(-e.deltaY / 400));
+      zoomAt(viewer, e);
     },
     { passive: false },
   );

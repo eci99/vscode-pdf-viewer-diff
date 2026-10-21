@@ -8,7 +8,7 @@
 // Side by side, the other document gets a viewer of its own ("second") instead
 // of the layer, and both show their original colours with the marks.
 // Differences are found in the rendered pixels or, if chosen, in the words of the text.
-import { MAX_SCALE, MIN_SCALE, enableDragScroll, initPdfjs, setupFind, trackToolbarHeight } from './common.js';
+import { enableDragScroll, initPdfjs, setupFind, trackToolbarHeight, zoomAt } from './common.js';
 
 const vscode = acquireVsCodeApi();
 const config = JSON.parse(document.getElementById('config').textContent);
@@ -126,9 +126,6 @@ async function main() {
   // side has its own zoom, and the controls change that of the active side.
   const zoomLinked = () => !sideBySide || scrollLock;
   const zoomViewer = () => (secondReady && !zoomLinked() && activeContainer === secondContainer ? secondViewer : viewer);
-  const setScale = (v, scale) => {
-    v.currentScaleValue = String(Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale)));
-  };
   $('zoomIn').addEventListener('click', () => zoomViewer().increaseScale());
   $('zoomOut').addEventListener('click', () => zoomViewer().decreaseScale());
   $('scale').addEventListener('change', (e) => {
@@ -171,7 +168,7 @@ async function main() {
         if (e.ctrlKey || e.metaKey) {
           e.preventDefault();
           const v = zoomLinked() || c === container ? viewer : secondViewer;
-          setScale(v, v.currentScale * Math.exp(-e.deltaY / 400));
+          zoomAt(v, e);
         }
       },
       { passive: false },
