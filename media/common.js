@@ -132,6 +132,86 @@ export function trackToolbarHeight() {
 }
 
 /**
+ * Tool switch: the hand tool drags the page, the other tool selects text.
+ * While Ctrl is held, the other tool is active.
+ * @param {HTMLElement[]} containers scroll containers
+ * @param {string | undefined} tool tool chosen last ('hand' or 'select'); the hand tool by default
+ * @param {(tool: string) => void} save called when the user chooses a tool
+ */
+export function setupTool(containers, tool, save) {
+  const button = (/** @type {string} */ id) => /** @type {HTMLElement} */ (document.getElementById(id));
+  let hand = tool !== 'select';
+  let ctrlHeld = false;
+  /** Whether Ctrl counts; it is not changed while a mouse button is down, e.g. during a text selection. */
+  let ctrl = false;
+  let pressed = false;
+  const isHand = () => hand !== ctrl;
+  const render = () => {
+    containers.forEach((c) => c.classList.toggle('handTool', isHand()));
+    button('toolSelect').setAttribute('aria-pressed', String(!isHand()));
+    button('toolHand').setAttribute('aria-pressed', String(isHand()));
+  };
+  const update = () => {
+    if (!pressed && ctrl !== ctrlHeld) {
+      ctrl = ctrlHeld;
+      render();
+    }
+  };
+  const choose = (/** @type {string} */ t) => {
+    hand = t === 'hand';
+    if (hand) {
+      getSelection()?.removeAllRanges();
+    }
+    render();
+    save(t);
+  };
+  button('toolSelect').addEventListener('click', () => choose('select'));
+  button('toolHand').addEventListener('click', () => choose('hand'));
+
+  window.addEventListener('keydown', (e) => {
+    // Ctrl in the find field (e.g. Ctrl+A) is not meant to switch.
+    if (e.key === 'Control' && !(/** @type {HTMLElement} */ (e.target).closest?.('input, select, textarea'))) {
+      ctrlHeld = true;
+      update();
+    }
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'Control') {
+      ctrlHeld = false;
+      update();
+    }
+  });
+  // Mouse events also tell whether Ctrl is down, e.g. when it was pressed while
+  // the editor did not have the focus.
+  window.addEventListener(
+    'pointerdown',
+    (e) => {
+      ctrlHeld = e.ctrlKey;
+      update();
+      pressed = true;
+    },
+    true,
+  );
+  window.addEventListener('pointermove', (e) => {
+    ctrlHeld = e.ctrlKey;
+    update();
+  });
+  const release = () => {
+    pressed = false;
+    update();
+  };
+  window.addEventListener('pointerup', release);
+  window.addEventListener('pointercancel', release);
+  window.addEventListener('blur', () => {
+    ctrlHeld = false;
+    release();
+  });
+
+  render();
+  containers.forEach((c) => enableDragScroll(c, isHand));
+}
+
+/**
  * Hand tool: lets the user drag the page with the mouse while isActive() is true.
  * @param {HTMLElement} container scroll container
  * @param {() => boolean} isActive

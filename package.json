@@ -2,7 +2,7 @@
   "name": "pdf-viewer-diff",
   "displayName": "PDF View & Compare",
   "description": "View PDF files in VS Code and compare them visually",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "eci99",
   "license": "MIT",
   "icon": "images/icon.png",

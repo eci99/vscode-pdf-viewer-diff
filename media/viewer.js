@@ -1,5 +1,5 @@
 // @ts-check
-import { enableDragScroll, initPdfjs, setupFind, trackToolbarHeight, zoomAt } from './common.js';
+import { initPdfjs, setupFind, setupTool, trackToolbarHeight, zoomAt } from './common.js';
 
 const vscode = acquireVsCodeApi();
 const config = JSON.parse(document.getElementById('config').textContent);
@@ -163,26 +163,10 @@ async function main() {
   }).observe(container);
 
   // --- Tool: text selection or hand (drag to scroll) ---
-  let handTool = false;
-  const applyTool = (tool) => {
-    handTool = tool !== 'select';
-    container.classList.toggle('handTool', handTool);
-    $('toolSelect').setAttribute('aria-pressed', String(!handTool));
-    $('toolHand').setAttribute('aria-pressed', String(handTool));
-    if (handTool) {
-      getSelection()?.removeAllRanges();
-    }
-  };
-  const setTool = (tool) => {
-    applyTool(tool);
+  setupTool([container], state.tool, (tool) => {
     state = { ...state, tool };
     vscode.setState(state);
-  };
-  applyTool(state.tool);
-  $('toolSelect').addEventListener('click', () => setTool('select'));
-  $('toolHand').addEventListener('click', () => setTool('hand'));
-
-  enableDragScroll(container, () => handTool);
+  });
 
   // --- Find ---
   setupFind(eventBus, container);

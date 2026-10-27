@@ -86,6 +86,9 @@ async function sendPdf(
 // How long (ms) after opening a PDF it is checked whether it is part of a diff editor.
 const DIFF_EDITOR_DELAY = 100;
 
+// At most this many PDFs of the workspace are offered when picking a file to compare.
+const MAX_PICKED_PDFS = 2000;
+
 // How long (ms) a compared file has to stay deleted before its comparison is closed.
 const FILE_GONE_DELAY = 2000;
 
@@ -234,14 +237,49 @@ interface CompareSource {
 
 async function comparePdfs(uri?: vscode.Uri, selected?: vscode.Uri[]): Promise<void> {
   const pickPdf = async (title: string, near?: vscode.Uri): Promise<vscode.Uri | undefined> => {
-    const picked = await vscode.window.showOpenDialog({
+    const browse = async (): Promise<vscode.Uri | undefined> => {
+      const picked = await vscode.window.showOpenDialog({
+        title,
+        openLabel: 'Select',
+        canSelectMany: false,
+        filters: { PDF: ['pdf'] },
+        defaultUri: near && vscode.Uri.joinPath(near, '..'),
+      });
+      return picked?.[0];
+    };
+    // The PDFs of the workspace are offered in VS Code itself: the system's file dialog may
+    // open behind the VS Code window (seen with KDE on Wayland), so that nothing seems to happen.
+    const pdfs = vscode.workspace.workspaceFolders
+      ? (await vscode.workspace.findFiles('**/*.pdf', undefined, MAX_PICKED_PDFS)).filter(
+          (uri) => uri.toString() !== near?.toString(),
+        )
+      : [];
+    if (pdfs.length === 0) {
+      return browse();
+    }
+    const folder = near && vscode.Uri.joinPath(near, '..').toString();
+    const inFolder = (uri: vscode.Uri): number => (vscode.Uri.joinPath(uri, '..').toString() === folder ? 0 : 1);
+    pdfs.sort(
+      (a, b) =>
+        inFolder(a) - inFolder(b) ||
+        vscode.workspace.asRelativePath(a).localeCompare(vscode.workspace.asRelativePath(b)),
+    );
+    type Item = vscode.QuickPickItem & { uri?: vscode.Uri };
+    const items: Item[] = [
+      { label: '$(folder-opened) Browse…', description: 'Choose a file with the file dialog' },
+      { label: '', kind: vscode.QuickPickItemKind.Separator },
+      ...pdfs.map((uri) => {
+        const relative = vscode.workspace.asRelativePath(uri);
+        const dir = relative.includes('/') ? relative.slice(0, relative.lastIndexOf('/')) : '';
+        return { label: `$(file-pdf) ${baseName(uri)}`, description: dir, uri };
+      }),
+    ];
+    const picked = await vscode.window.showQuickPick(items, {
       title,
-      openLabel: 'Select',
-      canSelectMany: false,
-      filters: { PDF: ['pdf'] },
-      defaultUri: near && vscode.Uri.joinPath(near, '..'),
+      placeHolder: 'Select a PDF of the workspace, or browse for one',
+      matchOnDescription: true,
     });
-    return picked?.[0];
+    return picked && (picked.uri ?? (await browse()));
   };
 
   let left: vscode.Uri | undefined;
@@ -752,10 +790,10 @@ const ZOOM_CONTROLS = /* html */ `
     </button>`;
 
 const TOOL_CONTROLS = /* html */ `
-    <button id="toolSelect" title="Text selection" aria-pressed="false">
+    <button id="toolSelect" title="Text selection (hold Ctrl to drag instead)" aria-pressed="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h3a1 1 0 0 1 1 1a1 1 0 0 1 1-1h3M8 20h3a1 1 0 0 0 1-1a1 1 0 0 0 1 1h3M12 5v14M10 12h4"/></svg>
     </button>
-    <button id="toolHand" title="Drag the page with the mouse" aria-pressed="true">
+    <button id="toolHand" title="Drag the page with the mouse (hold Ctrl to select text instead)" aria-pressed="true">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
     </button>`;
 

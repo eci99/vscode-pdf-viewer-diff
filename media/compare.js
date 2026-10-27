@@ -8,7 +8,7 @@
 // Side by side, the other document gets a viewer of its own ("second") instead
 // of the layer, and both show their original colours with the marks.
 // Differences are found in the rendered pixels or, if chosen, in the words of the text.
-import { enableDragScroll, initPdfjs, setupFind, trackToolbarHeight, zoomAt } from './common.js';
+import { initPdfjs, setupFind, setupTool, trackToolbarHeight, zoomAt } from './common.js';
 
 const vscode = acquireVsCodeApi();
 const config = JSON.parse(document.getElementById('config').textContent);
@@ -224,20 +224,7 @@ async function main() {
   $('rotateRight').addEventListener('click', () => rotate(90));
 
   // --- Tool: text selection or hand (drag to scroll) ---
-  let handTool = false;
-  const applyTool = (tool) => {
-    handTool = tool !== 'select';
-    containers.forEach((c) => c.classList.toggle('handTool', handTool));
-    $('toolSelect').setAttribute('aria-pressed', String(!handTool));
-    $('toolHand').setAttribute('aria-pressed', String(handTool));
-    if (handTool) {
-      getSelection()?.removeAllRanges();
-    }
-  };
-  applyTool(state.tool);
-  containers.forEach((c) => enableDragScroll(c, () => handTool));
-  $('toolSelect').addEventListener('click', () => (applyTool('select'), updateState({ tool: 'select' })));
-  $('toolHand').addEventListener('click', () => (applyTool('hand'), updateState({ tool: 'hand' })));
+  setupTool(containers, state.tool, (tool) => updateState({ tool }));
 
   // --- Showing / hiding the two documents and the difference marks ---
   const show = { left: state.showLeft !== false, right: state.showRight !== false };
