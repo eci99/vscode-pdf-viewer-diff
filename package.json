@@ -185,6 +185,7 @@
     "@types/node": "^26.6.5",
     "@types/vscode": "1.90",
     "@vscode/vsce": "^4.1.0",
+    "ovsx": "^1.3.0",
     "typescript": "^7.0.2"
   }
 }

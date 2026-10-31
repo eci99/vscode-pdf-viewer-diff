@@ -18,5 +18,8 @@ jobs:
           node-version: 22
       - run: npm ci --ignore-scripts
       - run: npm test
-      # Trusted publishing: the Marketplace policy must name this repo and publish.yml
-      - run: npx vsce publish --oidc
+      - run: npx vsce package -o extension.vsix
+      # Trusted publishing: the Marketplace policy and the Open VSX trusted publisher
+      # must name this repo and publish.yml
+      - run: npx vsce publish --oidc -i extension.vsix
+      - run: npx ovsx publish extension.vsix --trusted-publishing
