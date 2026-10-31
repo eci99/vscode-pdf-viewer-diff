@@ -2,6 +2,11 @@
 
 All notable changes to this extension are documented in this file.
 
+## 0.1.7 – 2026-10-31
+
+- PDFs in Git LFS: the committed version is read from the local LFS store of the repository (`.git/lfs/objects`) if it is there, so a comparison from Source Control no longer needs Git LFS to be installed, e.g. in WSL for a repository cloned with Git for Windows. Otherwise `git lfs smudge` is used as before; if that fails, the message says that Git LFS has to be installed where VS Code runs its extensions.
+- Fixed: the merge editor showed nothing for a PDF with a merge conflict (`git mergetool` with VS Code as merge tool, **Resolve in Merge Editor**). It is now replaced by a comparison of the current and the incoming version; **Accept Current** or **Accept Incoming** writes the chosen version to the merged file.
+
 ## 0.1.6 – 2026-10-27
 
 - The file to compare with is picked from the PDFs of the workspace, in VS Code itself; **Browse…** still opens the file dialog. The system's file dialog could open behind the VS Code window (seen with KDE on Wayland), so that the compare button seemed to do nothing.

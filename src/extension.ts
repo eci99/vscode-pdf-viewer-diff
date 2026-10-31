@@ -1,5 +1,6 @@
 import * as crypto from 'crypto';
 import { execFile } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
@@ -29,7 +30,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('pdfViewer.previousDifference', () =>
       compareProvider.goToDifference(-1),
     ),
+    vscode.commands.registerCommand('pdfViewer.acceptCurrent', () => compareProvider.acceptMerge('left')),
+    vscode.commands.registerCommand('pdfViewer.acceptIncoming', () => compareProvider.acceptMerge('right')),
     ...registerDropZone(),
+    ...registerMergeReplacement((side, result) => compareProvider.acceptMerge(side, result)),
   );
 }
 
@@ -41,19 +45,56 @@ const baseName = (uri: vscode.Uri): string => uri.path.split('/').pop()!;
 // A version from git of a file that is stored in Git LFS is only the small pointer file.
 const LFS_POINTER = 'version https://git-lfs.github.com/spec/';
 
-function resolveLfsPointer(uri: vscode.Uri, bytes: Uint8Array): Promise<Uint8Array> {
-  if (bytes.length > 1024 || !Buffer.from(bytes).toString('utf8').startsWith(LFS_POINTER)) {
-    return Promise.resolve(bytes);
+async function resolveLfsPointer(uri: vscode.Uri, bytes: Uint8Array): Promise<Uint8Array> {
+  const pointer = Buffer.from(bytes).toString('utf8');
+  if (bytes.length > 1024 || !pointer.startsWith(LFS_POINTER)) {
+    return bytes;
+  }
+  const cwd = path.dirname(uri.fsPath);
+  const stored = await readLfsObject(cwd, pointer);
+  if (stored) {
+    return stored;
   }
   return new Promise((resolve, reject) => {
     const child = execFile(
       'git',
       ['lfs', 'smudge'],
-      { cwd: path.dirname(uri.fsPath), encoding: 'buffer', maxBuffer: 1024 * 1024 * 1024 },
-      (err, stdout) => (err ? reject(new Error(`git lfs smudge failed: ${err.message}`)) : resolve(stdout)),
+      { cwd, encoding: 'buffer', maxBuffer: 1024 * 1024 * 1024 },
+      (err, stdout) =>
+        err
+          ? reject(
+              new Error(
+                `The file is stored in Git LFS and git lfs smudge failed: ${err.message.trim()} ` +
+                  `Is Git LFS installed where VS Code runs its extensions (e.g. in WSL)?`,
+              ),
+            )
+          : resolve(stdout),
     );
     child.stdin?.end(Buffer.from(bytes));
   });
+}
+
+// The content of an LFS file is usually in the local LFS store of the repository already,
+// e.g. because the file is checked out. Reading it from there does not need Git LFS, which
+// may be missing, e.g. in WSL when the repository was cloned with Git for Windows.
+async function readLfsObject(cwd: string, pointer: string): Promise<Uint8Array | undefined> {
+  const oid = /^oid sha256:([0-9a-f]{64})$/m.exec(pointer)?.[1];
+  if (!oid) {
+    return undefined;
+  }
+  try {
+    const gitDir = await new Promise<string>((resolve, reject) =>
+      execFile('git', ['rev-parse', '--git-common-dir'], { cwd }, (err, stdout) =>
+        err ? reject(err) : resolve(path.resolve(cwd, stdout.trim())),
+      ),
+    );
+    const data = await fs.promises.readFile(
+      path.join(gitDir, 'lfs', 'objects', oid.slice(0, 2), oid.slice(2, 4), oid),
+    );
+    return crypto.createHash('sha256').update(data).digest('hex') === oid ? data : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // The file is read through workspace.fs so that remote and virtual
@@ -422,6 +463,8 @@ interface Comparison {
   right: CompareSource;
   /** Replaces the default tab title. */
   title?: string;
+  /** Set if the comparison replaces a merge editor: the file that gets the chosen version. */
+  merge?: vscode.Uri;
 }
 
 /** Comparisons opened in this session, by id; needed for sources that only exist in memory. */
@@ -434,6 +477,7 @@ function openCompare(
   right: CompareSource,
   options: vscode.TextDocumentShowOptions = {},
   title?: string,
+  merge?: vscode.Uri,
 ): Thenable<unknown> {
   // The same two files give the same URI, so an open comparison of them is shown again.
   // The same goes for a file and its previous version, which then gets the newer snapshot.
@@ -445,10 +489,10 @@ function openCompare(
         : crypto.randomUUID();
   const existing = comparisons.get(id);
   if (existing) {
-    Object.assign(existing, { left, right, title });
+    Object.assign(existing, { left, right, title, merge });
     refreshers.get(id)?.();
   } else {
-    comparisons.set(id, { left, right, title });
+    comparisons.set(id, { left, right, title, merge });
   }
   const label = title ?? `compare: ${left.name} \u2194 ${right.name}`;
   const uri = vscode.Uri.from({
@@ -456,7 +500,13 @@ function openCompare(
     // A custom editor tab is named after the last segment of the path.
     path: `/${label}`.replace(/(?!^)\//g, '\u2215'),
     // The file URIs allow restoring the comparison after a restart.
-    query: JSON.stringify({ id, left: left.uri?.toString(), right: right.uri?.toString(), title }),
+    query: JSON.stringify({
+      id,
+      left: left.uri?.toString(),
+      right: right.uri?.toString(),
+      title,
+      merge: merge?.toString(),
+    }),
   });
   // An open comparison is shown where it is, also if it is in another editor group.
   const open = vscode.window.tabGroups.all.find((group) =>
@@ -486,6 +536,7 @@ class CompareDocument implements vscode.CustomDocument {
         left?: string;
         right?: string;
         title?: string;
+        merge?: string;
       };
       this.id = query.id;
       this.comparison =
@@ -495,6 +546,7 @@ class CompareDocument implements vscode.CustomDocument {
               left: fileSource(vscode.Uri.parse(query.left)),
               right: fileSource(vscode.Uri.parse(query.right)),
               title: query.title,
+              merge: query.merge ? vscode.Uri.parse(query.merge) : undefined,
             }
           : undefined);
     } catch {
@@ -520,7 +572,7 @@ class CompareEditorProvider implements vscode.CustomReadonlyEditorProvider<Compa
   static readonly viewType = 'pdfViewer.compare';
 
   readonly differences = vscode.languages.createDiagnosticCollection('pdfViewer.differences');
-  private readonly panels = new Set<vscode.WebviewPanel>();
+  private readonly panels = new Map<vscode.WebviewPanel, Comparison>();
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
@@ -583,7 +635,15 @@ class CompareEditorProvider implements vscode.CustomReadonlyEditorProvider<Compa
         );
       }
     }
-    this.panels.add(panel);
+    this.panels.set(panel, comparison);
+    // The buttons to accept a version are shown while a comparison that replaces a merge editor is active.
+    const updateContext = (): void => {
+      if (panel.active) {
+        void vscode.commands.executeCommand('setContext', MERGE_CONTEXT, !!comparison.merge);
+      }
+    };
+    updateContext();
+    disposables.push(panel.onDidChangeViewState(updateContext));
     if (document.id) {
       refreshers.set(document.id, () => {
         void send('left');
@@ -592,6 +652,9 @@ class CompareEditorProvider implements vscode.CustomReadonlyEditorProvider<Compa
     }
     panel.onDidDispose(() => {
       this.panels.delete(panel);
+      if (![...this.panels.keys()].some((p) => p.active)) {
+        void vscode.commands.executeCommand('setContext', MERGE_CONTEXT, false);
+      }
       if (document.id) {
         refreshers.delete(document.id);
       }
@@ -629,12 +692,139 @@ class CompareEditorProvider implements vscode.CustomReadonlyEditorProvider<Compa
     });
   }
 
+  private activePanel(): vscode.WebviewPanel | undefined {
+    const panels = [...this.panels.keys()];
+    return panels.find((p) => p.active) ?? panels.find((p) => p.visible);
+  }
+
   /** Jumps to the next (1) or previous (-1) difference in the active comparison. */
   goToDifference(direction: 1 | -1): void {
-    const panels = [...this.panels];
-    const panel = panels.find((p) => p.active) ?? panels.find((p) => p.visible);
-    void panel?.webview.postMessage({ type: 'goToDiff', direction });
+    void this.activePanel()?.webview.postMessage({ type: 'goToDiff', direction });
   }
+
+  /**
+   * Writes one side of a merge comparison to the merged file and closes the comparison.
+   * Without the merged file, the active comparison is meant.
+   */
+  async acceptMerge(side: 'left' | 'right', mergedFile?: vscode.Uri): Promise<void> {
+    const panel = mergedFile
+      ? [...this.panels].find(([, c]) => c.merge?.toString() === mergedFile.toString())?.[0]
+      : this.activePanel();
+    const comparison = panel && this.panels.get(panel);
+    const result = comparison?.merge;
+    if (!panel || !comparison || !result) {
+      return;
+    }
+    const { data, uri, name } = comparison[side];
+    try {
+      await vscode.workspace.fs.writeFile(result, new Uint8Array(data ?? (await readPdf(uri!))));
+    } catch (err) {
+      void vscode.window.showErrorMessage(
+        `Could not write ${baseName(result)}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
+    panel.dispose();
+    // Closing the merged file as well ends a waiting `git mergetool`.
+    const tabs = vscode.window.tabGroups.all.flatMap((group) =>
+      group.tabs.filter(
+        (tab) =>
+          tab.input instanceof vscode.TabInputCustom &&
+          tab.input.viewType === PdfEditorProvider.viewType &&
+          tab.input.uri.toString() === result.toString(),
+      ),
+    );
+    await vscode.window.tabGroups.close(tabs).then(undefined, () => {});
+    const fromGit = comparison.left.uri?.scheme === GIT_SCHEME || comparison.right.uri?.scheme === GIT_SCHEME;
+    void vscode.window.showInformationMessage(
+      `${baseName(result)}: “${name}” was kept.` +
+        (fromGit ? ' Stage the file to mark the conflict as resolved.' : ''),
+    );
+  }
+}
+
+const MERGE_CONTEXT = 'pdfViewer.mergeActive';
+const ACCEPT_CURRENT = 'Accept Current';
+const ACCEPT_INCOMING = 'Accept Incoming';
+
+// The input of a merge editor tab. The API does not declare it (it is "unknown"),
+// but the object has these URIs.
+interface MergeInput {
+  input1: vscode.Uri;
+  input2: vscode.Uri;
+  result: vscode.Uri;
+}
+
+function pdfMergeInput(input: unknown): MergeInput | undefined {
+  const merge = input as Partial<MergeInput> | undefined;
+  return merge &&
+    merge.input1 instanceof vscode.Uri &&
+    merge.input2 instanceof vscode.Uri &&
+    merge.result instanceof vscode.Uri &&
+    isPdf(merge.result)
+    ? (merge as MergeInput)
+    : undefined;
+}
+
+// The merge editor of VS Code (`git mergetool` with `code --merge`, "Resolve in Merge Editor")
+// only handles text and shows nothing useful for a PDF. It is replaced by a comparison of
+// the two versions, in which one of them can be accepted.
+function registerMergeReplacement(
+  acceptMerge: (side: 'left' | 'right', result: vscode.Uri) => Promise<void>,
+): vscode.Disposable[] {
+  const replacing = new Set<string>();
+  const replace = async (tab: vscode.Tab, merge: MergeInput): Promise<void> => {
+    const key = merge.result.toString();
+    if (replacing.has(key)) {
+      return;
+    }
+    replacing.add(key);
+    try {
+      const viewColumn = tab.group.viewColumn;
+      const name = baseName(merge.result);
+      const source = (uri: vscode.Uri, version: string): CompareSource => ({
+        name: `${name} (${version})`,
+        description: vscode.workspace.asRelativePath(uri),
+        uri,
+      });
+      // `code --wait` returns once no editor shows the merged file any more, so it is opened
+      // before the merge editor is closed; it also shows the current content of the file.
+      await vscode.commands.executeCommand('vscode.openWith', merge.result, PdfEditorProvider.viewType, {
+        viewColumn,
+        preview: false,
+        preserveFocus: true,
+      });
+      await openCompare(
+        source(merge.input1, 'current'),
+        source(merge.input2, 'incoming'),
+        { viewColumn, preview: false },
+        `merge: ${name}`,
+        merge.result,
+      );
+      await vscode.window.tabGroups.close(tab).then(undefined, () => {});
+    } finally {
+      replacing.delete(key);
+    }
+    const choice = await vscode.window.showInformationMessage(
+      `Merge of ${baseName(merge.result)}: choose the version to keep.`,
+      ACCEPT_CURRENT,
+      ACCEPT_INCOMING,
+    );
+    if (choice) {
+      await acceptMerge(choice === ACCEPT_CURRENT ? 'left' : 'right', merge.result);
+    }
+  };
+  const check = (tabs: readonly vscode.Tab[]): void => {
+    for (const tab of tabs) {
+      const merge = pdfMergeInput(tab.input);
+      if (merge) {
+        void replace(tab, merge);
+      }
+    }
+  };
+  // The extension may only be activated after the merge editor was opened.
+  check(vscode.window.tabGroups.all.flatMap((group) => group.tabs));
+  return [vscode.window.tabGroups.onDidChangeTabs((e) => check([...e.opened, ...e.changed]))];
 }
 
 // Backs the virtual documents of comparisons; they have no content of their own.

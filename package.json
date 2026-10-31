@@ -2,7 +2,7 @@
   "name": "pdf-viewer-diff",
   "displayName": "PDF View & Compare",
   "description": "View PDF files in VS Code and compare them visually",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publisher": "eci99",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -31,6 +31,9 @@
     "pdf.js"
   ],
   "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": true
@@ -89,6 +92,16 @@
         "command": "pdfViewer.previousDifference",
         "title": "Go to Previous Difference",
         "category": "PDF View & Compare"
+      },
+      {
+        "command": "pdfViewer.acceptCurrent",
+        "title": "Accept Current",
+        "category": "PDF View & Compare"
+      },
+      {
+        "command": "pdfViewer.acceptIncoming",
+        "title": "Accept Incoming",
+        "category": "PDF View & Compare"
       }
     ],
     "menus": {
@@ -104,6 +117,16 @@
           "command": "pdfViewer.compare",
           "when": "activeCustomEditorId == pdfViewer.preview",
           "group": "navigation"
+        },
+        {
+          "command": "pdfViewer.acceptCurrent",
+          "when": "activeCustomEditorId == pdfViewer.compare && pdfViewer.mergeActive",
+          "group": "navigation@1"
+        },
+        {
+          "command": "pdfViewer.acceptIncoming",
+          "when": "activeCustomEditorId == pdfViewer.compare && pdfViewer.mergeActive",
+          "group": "navigation@2"
         }
       ],
       "commandPalette": [
@@ -114,6 +137,14 @@
         {
           "command": "pdfViewer.previousDifference",
           "when": "activeCustomEditorId == pdfViewer.compare"
+        },
+        {
+          "command": "pdfViewer.acceptCurrent",
+          "when": "activeCustomEditorId == pdfViewer.compare && pdfViewer.mergeActive"
+        },
+        {
+          "command": "pdfViewer.acceptIncoming",
+          "when": "activeCustomEditorId == pdfViewer.compare && pdfViewer.mergeActive"
         }
       ]
     },
@@ -152,7 +183,7 @@
   "devDependencies": {
     "@types/node": "^26.6.5",
     "@types/vscode": "1.90",
-    "@vscode/vsce": "^4.0.0",
+    "@vscode/vsce": "^4.1.0",
     "typescript": "^7.0.2"
   }
 }

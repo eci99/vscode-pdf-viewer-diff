@@ -14,3 +14,7 @@ node_modules/pdfjs-dist/legacy/build/*.min.mjs
 node_modules/pdfjs-dist/legacy/build/pdf.sandbox.mjs
 node_modules/pdfjs-dist/webpack.mjs
 images/demo.gif
+graphify-out/**
+CLAUDE.md
+.claude/**
+.github/**
