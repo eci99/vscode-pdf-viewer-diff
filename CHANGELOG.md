@@ -2,6 +2,10 @@
 
 All notable changes to this extension are documented in this file.
 
+## 0.1.8 – 2026-10-31
+
+- Published from GitHub Actions to the VS Code Marketplace and Open VSX; Open VSX had only 0.1.6. The package no longer contains test files.
+
 ## 0.1.7 – 2026-10-31
 
 - PDFs in Git LFS: the committed version is read from the local LFS store of the repository (`.git/lfs/objects`) if it is there, so a comparison from Source Control no longer needs Git LFS to be installed, e.g. in WSL for a repository cloned with Git for Windows. Otherwise `git lfs smudge` is used as before; if that fails, the message says that Git LFS has to be installed where VS Code runs its extensions.
