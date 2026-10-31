@@ -18,3 +18,4 @@ graphify-out/**
 CLAUDE.md
 .claude/**
 .github/**
+out/**/*.test.js

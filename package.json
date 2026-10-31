@@ -175,7 +175,8 @@
     "compile": "tsc -p .",
     "watch": "tsc -watch -p .",
     "vscode:prepublish": "npm run compile",
-    "package": "vsce package"
+    "package": "vsce package",
+    "test": "npm run compile && node --test out/*.test.js"
   },
   "dependencies": {
     "pdfjs-dist": "^6.4.299"

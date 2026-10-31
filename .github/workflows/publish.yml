@@ -16,6 +16,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm ci
+      - run: npm ci --ignore-scripts
+      - run: npm test
       # Trusted publishing: the Marketplace policy must name this repo and publish.yml
       - run: npx vsce publish --oidc
