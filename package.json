@@ -1,8 +1,8 @@
 {
   "name": "pdf-viewer-diff",
-  "displayName": "PDF View & Compare",
+  "displayName": "PDF Viewer & Compare",
   "description": "View PDF files in VS Code and compare them visually",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "publisher": "eci99",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -80,38 +80,31 @@
       {
         "command": "pdfViewer.compare",
         "title": "Compare PDF with…",
-        "category": "PDF View & Compare",
+        "category": "PDF Viewer & Compare",
         "icon": "$(diff)"
       },
       {
         "command": "pdfViewer.nextDifference",
         "title": "Go to Next Difference",
-        "category": "PDF View & Compare"
+        "category": "PDF Viewer & Compare"
       },
       {
         "command": "pdfViewer.previousDifference",
         "title": "Go to Previous Difference",
-        "category": "PDF View & Compare"
+        "category": "PDF Viewer & Compare"
       },
       {
         "command": "pdfViewer.acceptCurrent",
         "title": "Accept Current",
-        "category": "PDF View & Compare"
+        "category": "PDF Viewer & Compare"
       },
       {
         "command": "pdfViewer.acceptIncoming",
         "title": "Accept Incoming",
-        "category": "PDF View & Compare"
+        "category": "PDF Viewer & Compare"
       }
     ],
     "menus": {
-      "explorer/context": [
-        {
-          "command": "pdfViewer.compare",
-          "when": "resourceExtname == .pdf",
-          "group": "3_compare"
-        }
-      ],
       "editor/title": [
         {
           "command": "pdfViewer.compare",

@@ -195,7 +195,7 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
     openCompare(fileSource(original), fileSource(modified), {
       viewColumn: panel.viewColumn,
       preview: tab.isPreview,
-    }, `compare: ${baseName(modified)} (git)`).then(
+    }, original.scheme === GIT_SCHEME ? `compare: ${baseName(modified)} (git)` : undefined).then(
       // If the diff was a preview tab, the comparison has replaced it already.
       () => vscode.window.tabGroups.close(tab).then(undefined, () => {}),
       () => {},

@@ -2,6 +2,12 @@
 
 All notable changes to this extension are documented in this file.
 
+## 0.1.9 – 2026-11-01
+
+- Renamed to "PDF Viewer & Compare".
+- Removed **Compare PDF with…** from the Explorer context menu; use **Select for Compare** and **Compare with Selected** of VS Code instead.
+- Fixed: a comparison opened from a diff of two files on disk had "(git)" in its title.
+
 ## 0.1.8 – 2026-10-31
 
 - Published from GitHub Actions to the VS Code Marketplace and Open VSX; Open VSX had only 0.1.6. The package no longer contains test files.
