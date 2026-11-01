@@ -8,7 +8,7 @@ Displays PDF files directly in the editor and compares two PDFs visually. Render
 > committing a PDF. A side-by-side view was not enough for that, because I still had to hunt
 > for the differences myself.
 
-![Zooming, paging and searching in a PDF, then comparing it with the committed version from Source Control](images/demo.gif)
+![Zooming, paging and searching in a PDF, comparing it with another PDF, jumping between the differences, comparing the text, and zooming side by side with the scroll lock](images/demo.gif)
 
 ## Features
 
@@ -100,7 +100,7 @@ The extension code is in `src/extension.ts`. The webviews are plain JavaScript m
 
 ```sh
 npx vsce package
-code --install-extension pdf-viewer-diff-0.1.4.vsix
+code --install-extension pdf-viewer-diff-*.vsix
 ```
 
 ## License

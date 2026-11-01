@@ -2,6 +2,11 @@
 
 All notable changes to this extension are documented in this file.
 
+## 0.1.10 – 2026-11-01
+
+- Fixed: side by side with the scroll lock, `Ctrl`+mouse wheel zoomed around the top left corner instead of the mouse pointer.
+- README: new demo GIF and screenshot of the comparison.
+
 ## 0.1.9 – 2026-11-01
 
 - Renamed to "PDF Viewer & Compare".

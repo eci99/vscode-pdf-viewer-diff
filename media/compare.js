@@ -169,6 +169,11 @@ async function main() {
           e.preventDefault();
           const v = zoomLinked() || c === container ? viewer : secondViewer;
           zoomAt(v, e);
+          // pdf.js has scrolled the second viewer to keep its top left corner; with the scroll
+          // lock it follows the main one, before its scroll event can move the main one back.
+          if (v === viewer) {
+            syncScroll(container);
+          }
         }
       },
       { passive: false },
